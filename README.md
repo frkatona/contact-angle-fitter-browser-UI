@@ -10,6 +10,23 @@ python server.py
 
 Open `http://127.0.0.1:8000`.
 
+## Run With Docker
+
+Build and run the app from this folder:
+
+```bash
+docker build -t contact-angle-workbench .
+docker run --rm -p 8000:8000 contact-angle-workbench
+```
+
+Then open `http://localhost:8000`.
+
+With Docker Compose:
+
+```bash
+docker compose up --build
+```
+
 ## Workflow
 
 1. Load an image with the button or drag image files anywhere into the window.

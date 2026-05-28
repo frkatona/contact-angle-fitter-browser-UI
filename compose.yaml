@@ -1,0 +1,9 @@
+services:
+  contact-angle-workbench:
+    build: .
+    image: contact-angle-workbench:latest
+    ports:
+      - "8000:8000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000

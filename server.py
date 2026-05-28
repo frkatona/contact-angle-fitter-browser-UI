@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -233,9 +234,10 @@ class AppHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
-    port = 8000
-    server = ThreadingHTTPServer(("127.0.0.1", port), AppHandler)
-    print(f"Contact Angle Workbench running at http://127.0.0.1:{port}")
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8000"))
+    server = ThreadingHTTPServer((host, port), AppHandler)
+    print(f"Contact Angle Workbench running at http://{host}:{port}")
     server.serve_forever()
 
 
