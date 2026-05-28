@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Contact Angle Workbench</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <aside class="rail">
+        <div>
+          <p class="eyebrow">Contact Angle</p>
+          <h1>Workbench</h1>
+        </div>
+        <label class="file-picker">
+          <input id="imageInput" type="file" accept="image/*">
+          <span>Load image</span>
+        </label>
+        <div class="segmented" role="group" aria-label="Drawing mode">
+          <button class="mode active" data-mode="trace" title="Trace droplet boundary">Trace</button>
+          <button class="mode" data-mode="baseline" title="Pick the solid baseline">Baseline</button>
+        </div>
+        <div class="controls">
+          <label>
+            Run label
+            <input id="runLabel" value="Run 1">
+          </label>
+          <label>
+            Brush spacing
+            <input id="spacing" type="range" min="2" max="16" value="5">
+          </label>
+        </div>
+        <div class="actions">
+          <button id="fitBtn">Fit</button>
+          <button id="saveBtn" disabled>Save Run</button>
+          <button id="newTraceBtn">New Trace</button>
+          <button id="undoBtn">Undo Point</button>
+          <button id="clearBtn">Clear</button>
+          <button id="exportBtn">Export CSV</button>
+        </div>
+      </aside>
+
+      <section class="stage">
+        <div class="canvas-wrap">
+          <canvas id="canvas"></canvas>
+          <div id="emptyState" class="empty-state">
+            <strong>Load a droplet image</strong>
+            <span>Set the baseline, trace the droplet edge, then fit.</span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <section>
+          <p class="eyebrow">Current Fit</p>
+          <div id="fitSummary" class="summary muted">No fit yet.</div>
+        </section>
+        <section>
+          <p class="eyebrow">Runs</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Label</th>
+                  <th>Fit</th>
+                  <th>Theta L</th>
+                  <th>Theta R</th>
+                  <th>Mean</th>
+                  <th>Pts</th>
+                </tr>
+              </thead>
+              <tbody id="runsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </aside>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
