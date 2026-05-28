@@ -1,39 +1,245 @@
 const canvas = document.querySelector("#canvas");
 const ctx = canvas.getContext("2d");
 const imageInput = document.querySelector("#imageInput");
+const imageNameDisplay = document.querySelector("#imageNameDisplay");
 const emptyState = document.querySelector("#emptyState");
 const fitBtn = document.querySelector("#fitBtn");
 const saveBtn = document.querySelector("#saveBtn");
 const newTraceBtn = document.querySelector("#newTraceBtn");
 const undoBtn = document.querySelector("#undoBtn");
+const clearFitsBtn = document.querySelector("#clearFitsBtn");
 const clearBtn = document.querySelector("#clearBtn");
 const exportBtn = document.querySelector("#exportBtn");
+const exportTableBtn = document.querySelector("#exportTableBtn");
 const runLabel = document.querySelector("#runLabel");
 const spacing = document.querySelector("#spacing");
+const spacingBubble = document.querySelector("#spacingBubble");
+const thresholdInput = document.querySelector("#thresholdInput");
+const thresholdControl = document.querySelector("#thresholdControl");
 const fitSummary = document.querySelector("#fitSummary");
 const runsBody = document.querySelector("#runsBody");
+const imageList = document.querySelector("#imageList");
+const activeResultsLabel = document.querySelector("#activeResultsLabel");
+const zoomOutBtn = document.querySelector("#zoomOutBtn");
+const zoomResetBtn = document.querySelector("#zoomResetBtn");
+const zoomInBtn = document.querySelector("#zoomInBtn");
+const zoomLevel = document.querySelector("#zoomLevel");
+const dropOverlay = document.querySelector("#dropOverlay");
 
 let mode = "trace";
+let images = [];
+let activeImageId = null;
+let imageSerial = 0;
 let img = null;
 let imageName = "image";
 let trace = [];
 let baseline = [];
 let runs = [];
 let currentFit = null;
+let pendingFit = false;
+let previousFits = [];
+let selectedMode = "trace";
+let undoStack = [];
+let redoStack = [];
+let thresholdEnabled = false;
+let thresholdValue = 128;
 let isDrawing = false;
+let isPanning = false;
 let lastPoint = null;
-let view = { scale: 1, ox: 0, oy: 0, width: 1, height: 1 };
+let panStart = null;
+let view = { scale: 1, fitScale: 1, ox: 0, oy: 0, width: 1, height: 1 };
+let viewport = { zoom: 1, panX: 0, panY: 0 };
+let heldMode = null;
+let heldModeReturn = null;
 
-function setMode(nextMode) {
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function setMode(nextMode, options = {}) {
   mode = nextMode;
+  if (!options.temporary) selectedMode = nextMode;
+  canvas.dataset.mode = mode;
   document.querySelectorAll(".mode").forEach((button) => {
     button.classList.toggle("active", button.dataset.mode === mode);
   });
 }
 
+function beginHeldMode(nextMode) {
+  if (heldMode || mode === nextMode) return;
+  heldMode = nextMode;
+  heldModeReturn = mode;
+  setMode(nextMode, { temporary: true });
+}
+
+function endHeldMode(nextMode) {
+  if (heldMode !== nextMode) return;
+  setMode(heldModeReturn || selectedMode || "trace", { temporary: true });
+  heldMode = null;
+  heldModeReturn = null;
+}
+
+function isFormControl(target) {
+  return Boolean(target?.closest?.("input, textarea, select, button, a, [contenteditable='true']"));
+}
+
+function activeRecord() {
+  return images.find((record) => record.id === activeImageId) || null;
+}
+
+function syncActiveRecord() {
+  const record = activeRecord();
+  if (!record) return;
+  record.trace = trace;
+  record.baseline = baseline;
+  record.runs = runs;
+  record.currentFit = currentFit;
+  record.pendingFit = pendingFit;
+  record.previousFits = previousFits;
+  record.selectedMode = selectedMode;
+  record.undoStack = undoStack;
+  record.redoStack = redoStack;
+  record.thresholdEnabled = thresholdEnabled;
+  record.thresholdValue = thresholdValue;
+  record.viewport = { ...viewport };
+  record.runLabel = runLabel.value;
+}
+
+function allRuns() {
+  return images.flatMap((record) => record.runs.map((run) => ({ ...run, image_name: record.name })));
+}
+
+function updateComparisonControls() {
+  clearFitsBtn.disabled = previousFits.length === 0;
+}
+
+function isImageFile(file) {
+  return Boolean(file?.type?.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif)$/i.test(file?.name || ""));
+}
+
+function clonePoint(point) {
+  return { x: point.x, y: point.y };
+}
+
+function clonePoints(points) {
+  return points.map(clonePoint);
+}
+
+function cloneFit(fit) {
+  return fit ? JSON.parse(JSON.stringify(fit)) : null;
+}
+
+function archiveCurrentFitForComparison() {
+  if (!currentFit || baseline.length !== 2) return;
+  previousFits.push({
+    fit: cloneFit(currentFit),
+    trace: clonePoints(trace),
+    baseline: clonePoints(baseline),
+    label: runLabel.value || currentFit.label || `Fit ${previousFits.length + 1}`,
+  });
+  if (previousFits.length > 24) previousFits.shift();
+  updateComparisonControls();
+}
+
+function invalidateCurrentFit() {
+  currentFit = null;
+  pendingFit = false;
+  saveBtn.disabled = true;
+}
+
+function pushHistory(action) {
+  undoStack.push(action);
+  redoStack = [];
+  if (undoStack.length > 1000) undoStack.shift();
+}
+
+function applyHistory(action, direction) {
+  const redo = direction === "redo";
+  archiveCurrentFitForComparison();
+  if (action.type === "trace:add") {
+    if (redo) trace.push(clonePoint(action.point));
+    else trace.pop();
+  } else if (action.type === "baseline:set") {
+    baseline = clonePoints(redo ? action.next : action.previous);
+  }
+  invalidateCurrentFit();
+  syncActiveRecord();
+  draw();
+}
+
+function undoPoint() {
+  const action = undoStack.pop();
+  if (!action) return;
+  applyHistory(action, "undo");
+  redoStack.push(action);
+  syncActiveRecord();
+}
+
+function redoPoint() {
+  const action = redoStack.pop();
+  if (!action) return;
+  applyHistory(action, "redo");
+  undoStack.push(action);
+  syncActiveRecord();
+}
+
+function setThresholdEnabled(enabled, shouldDraw = true) {
+  thresholdEnabled = enabled;
+  thresholdControl.classList.toggle("active", thresholdEnabled);
+  syncActiveRecord();
+  if (shouldDraw) draw();
+}
+
+function setThresholdValue(value, shouldDraw = true) {
+  thresholdValue = clamp(Math.round(Number(value) || 0), 0, 255);
+  thresholdInput.value = thresholdValue;
+  const record = activeRecord();
+  if (record) record.thresholdCache = null;
+  syncActiveRecord();
+  if (shouldDraw) draw();
+}
+
+function toggleThresholdView() {
+  setThresholdEnabled(!thresholdEnabled);
+}
+
+function updateSpacingBubble() {
+  const min = Number(spacing.min);
+  const max = Number(spacing.max);
+  const value = Number(spacing.value);
+  const percent = ((value - min) / (max - min)) * 100;
+  spacingBubble.textContent = String(value);
+  spacingBubble.style.left = `${percent}%`;
+}
+
+function showSpacingBubble() {
+  updateSpacingBubble();
+  spacing.parentElement.classList.add("active");
+}
+
+function hideSpacingBubble() {
+  spacing.parentElement.classList.remove("active");
+}
+
 document.querySelectorAll(".mode").forEach((button) => {
-  button.addEventListener("click", () => setMode(button.dataset.mode));
+  button.addEventListener("click", () => {
+    setMode(button.dataset.mode);
+    syncActiveRecord();
+  });
 });
+
+setMode(mode, { temporary: true });
+
+function updateZoomLabel() {
+  zoomLevel.textContent = `${Math.round(viewport.zoom * 100)}%`;
+}
+
+function resetViewport(shouldDraw = true) {
+  viewport = { zoom: 1, panX: 0, panY: 0 };
+  syncActiveRecord();
+  updateZoomLabel();
+  if (shouldDraw) draw();
+}
 
 function resizeCanvas() {
   const rect = canvas.parentElement.getBoundingClientRect();
@@ -46,53 +252,238 @@ function resizeCanvas() {
 
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
+updateZoomLabel();
+updateRunControls();
+renderImageList();
+updateComparisonControls();
+updateSpacingBubble();
+
+function resetFitSummary() {
+  fitSummary.classList.add("muted");
+  fitSummary.textContent = "No fit yet.";
+}
+
+function clearActiveImage() {
+  activeImageId = null;
+  img = null;
+  imageName = "image";
+  trace = [];
+  baseline = [];
+  runs = [];
+  currentFit = null;
+  pendingFit = false;
+  previousFits = [];
+  selectedMode = "trace";
+  undoStack = [];
+  redoStack = [];
+  thresholdEnabled = false;
+  thresholdValue = 128;
+  viewport = { zoom: 1, panX: 0, panY: 0 };
+  runLabel.value = "Run 1";
+  thresholdInput.value = thresholdValue;
+  thresholdControl.classList.remove("active");
+  imageNameDisplay.textContent = "No image loaded";
+  imageNameDisplay.title = "";
+  emptyState.style.display = "";
+  setMode("trace");
+  resetFitSummary();
+  saveBtn.disabled = true;
+  updateComparisonControls();
+  updateZoomLabel();
+  renderRuns();
+  renderImageList();
+  draw();
+}
+
+function switchToImage(imageId) {
+  syncActiveRecord();
+  const record = images.find((item) => item.id === imageId);
+  if (!record) {
+    clearActiveImage();
+    return;
+  }
+  activeImageId = record.id;
+  img = record.img;
+  imageName = record.name;
+  trace = record.trace;
+  baseline = record.baseline;
+  runs = record.runs;
+  currentFit = record.currentFit;
+  pendingFit = Boolean(record.pendingFit);
+  previousFits = record.previousFits || [];
+  selectedMode = record.selectedMode || "trace";
+  undoStack = record.undoStack || [];
+  redoStack = record.redoStack || [];
+  thresholdEnabled = Boolean(record.thresholdEnabled);
+  thresholdValue = record.thresholdValue ?? 128;
+  viewport = { ...record.viewport };
+  runLabel.value = record.runLabel || `Run ${runs.length + 1}`;
+  thresholdInput.value = thresholdValue;
+  thresholdControl.classList.toggle("active", thresholdEnabled);
+  imageNameDisplay.textContent = record.name;
+  imageNameDisplay.title = record.name;
+  emptyState.style.display = "none";
+  setMode(selectedMode, { temporary: true });
+  updateZoomLabel();
+  if (currentFit) renderFit(currentFit);
+  else resetFitSummary();
+  saveBtn.disabled = !pendingFit;
+  updateComparisonControls();
+  renderRuns();
+  renderImageList();
+  draw();
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const nextImage = new Image();
+    nextImage.onload = () => resolve(nextImage);
+    nextImage.onerror = () => reject(new Error("Could not load image."));
+    nextImage.src = src;
+  });
+}
+
+async function loadImageFile(file) {
+  if (!isImageFile(file)) return;
+  const key = `${file.name}:${file.size}:${file.lastModified}`;
+  const existing = images.find((record) => record.key === key);
+  if (existing) {
+    switchToImage(existing.id);
+    return;
+  }
+  const dataUrl = await readFileAsDataUrl(file);
+  const loadedImage = await loadImageElement(dataUrl);
+  const record = {
+    id: `image-${++imageSerial}`,
+    key,
+    name: file.name,
+    size: file.size,
+    lastModified: file.lastModified,
+    img: loadedImage,
+    trace: [],
+    baseline: [],
+    runs: [],
+    currentFit: null,
+    pendingFit: false,
+    previousFits: [],
+    selectedMode: "trace",
+    undoStack: [],
+    redoStack: [],
+    thresholdEnabled: false,
+    thresholdValue: 128,
+    thresholdCache: null,
+    viewport: { zoom: 1, panX: 0, panY: 0 },
+    runLabel: "Run 1",
+  };
+  images.push(record);
+  switchToImage(record.id);
+}
+
+async function loadFiles(fileList) {
+  const files = Array.from(fileList || []).filter(isImageFile);
+  for (const file of files) {
+    await loadImageFile(file);
+  }
+  imageInput.value = "";
+}
 
 imageInput.addEventListener("change", (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
-  imageName = file.name;
-  const reader = new FileReader();
-  reader.onload = () => {
-    img = new Image();
-    img.onload = () => {
-      emptyState.style.display = "none";
-      trace = [];
-      baseline = [];
-      currentFit = null;
-      draw();
-    };
-    img.src = reader.result;
-  };
-  reader.readAsDataURL(file);
+  loadFiles(event.target.files);
+});
+
+runLabel.addEventListener("input", syncActiveRecord);
+thresholdInput.addEventListener("input", () => setThresholdValue(thresholdInput.value));
+spacing.addEventListener("input", showSpacingBubble);
+spacing.addEventListener("pointerdown", showSpacingBubble);
+spacing.addEventListener("pointerup", hideSpacingBubble);
+spacing.addEventListener("pointercancel", hideSpacingBubble);
+spacing.addEventListener("focus", showSpacingBubble);
+spacing.addEventListener("blur", hideSpacingBubble);
+
+function eventHasImageFiles(event) {
+  const transfer = event.dataTransfer;
+  if (!transfer) return false;
+  if (Array.from(transfer.items || []).some((item) => item.kind === "file" && (!item.type || item.type.startsWith("image/")))) {
+    return true;
+  }
+  return Array.from(transfer.types || []).includes("Files");
+}
+
+window.addEventListener("dragenter", (event) => {
+  if (!eventHasImageFiles(event)) return;
+  event.preventDefault();
+  document.body.classList.add("dragging-files");
+});
+
+window.addEventListener("dragover", (event) => {
+  if (!eventHasImageFiles(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  document.body.classList.add("dragging-files");
+});
+
+window.addEventListener("dragleave", (event) => {
+  if (event.relatedTarget) return;
+  document.body.classList.remove("dragging-files");
+});
+
+window.addEventListener("drop", (event) => {
+  event.preventDefault();
+  document.body.classList.remove("dragging-files");
+  loadFiles(event.dataTransfer.files);
 });
 
 function computeView() {
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
   if (!img) {
-    view = { scale: 1, ox: 0, oy: 0, width, height };
+    view = { scale: 1, fitScale: 1, ox: 0, oy: 0, width, height };
     return;
   }
-  const scale = Math.min(width / img.width, height / img.height) * 0.96;
+  const fitScale = Math.min(width / img.width, height / img.height) * 0.96;
+  const scale = fitScale * viewport.zoom;
   const drawWidth = img.width * scale;
   const drawHeight = img.height * scale;
   view = {
     scale,
-    ox: (width - drawWidth) / 2,
-    oy: (height - drawHeight) / 2,
+    fitScale,
+    ox: (width - drawWidth) / 2 + viewport.panX,
+    oy: (height - drawHeight) / 2 + viewport.panY,
     width: drawWidth,
     height: drawHeight,
   };
 }
 
-function screenToImage(event) {
+function eventToCanvasPoint(event) {
   const rect = canvas.getBoundingClientRect();
-  const x = (event.clientX - rect.left - view.ox) / view.scale;
-  const y = (event.clientY - rect.top - view.oy) / view.scale;
   return {
-    x: Math.max(0, Math.min(img?.width || 0, x)),
-    y: Math.max(0, Math.min(img?.height || 0, y)),
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
   };
+}
+
+function screenToImagePoint(x, y, shouldClamp = true) {
+  const imageX = (x - view.ox) / view.scale;
+  const imageY = (y - view.oy) / view.scale;
+  if (!shouldClamp) return { x: imageX, y: imageY };
+  return {
+    x: clamp(imageX, 0, img?.width || 0),
+    y: clamp(imageY, 0, img?.height || 0),
+  };
+}
+
+function screenToImage(event) {
+  const point = eventToCanvasPoint(event);
+  return screenToImagePoint(point.x, point.y);
 }
 
 function imageToScreen(point) {
@@ -102,26 +493,83 @@ function imageToScreen(point) {
   };
 }
 
+function zoomAt(factor, anchorX = canvas.clientWidth / 2, anchorY = canvas.clientHeight / 2) {
+  if (!img) return;
+  computeView();
+  const imageAnchor = screenToImagePoint(anchorX, anchorY, false);
+  viewport.zoom = clamp(viewport.zoom * factor, 0.5, 32);
+  computeView();
+  viewport.panX += anchorX - (view.ox + imageAnchor.x * view.scale);
+  viewport.panY += anchorY - (view.oy + imageAnchor.y * view.scale);
+  syncActiveRecord();
+  updateZoomLabel();
+  draw();
+}
+
+canvas.addEventListener("wheel", (event) => {
+  if (!img) return;
+  event.preventDefault();
+  const anchor = eventToCanvasPoint(event);
+  const factor = Math.exp(-event.deltaY * 0.0015);
+  zoomAt(factor, anchor.x, anchor.y);
+}, { passive: false });
+
+zoomOutBtn.addEventListener("click", () => zoomAt(0.8));
+zoomInBtn.addEventListener("click", () => zoomAt(1.25));
+zoomResetBtn.addEventListener("click", () => resetViewport());
+
 function addTracePoint(point) {
   const minSpacing = Number(spacing.value);
   if (!lastPoint || Math.hypot(point.x - lastPoint.x, point.y - lastPoint.y) >= minSpacing) {
-    trace.push(point);
+    archiveCurrentFitForComparison();
+    const nextPoint = clonePoint(point);
+    trace.push(nextPoint);
     lastPoint = point;
-    currentFit = null;
-    saveBtn.disabled = true;
+    pushHistory({ type: "trace:add", point: nextPoint });
+    invalidateCurrentFit();
+    syncActiveRecord();
     draw();
   }
+}
+
+function startPan(event) {
+  isPanning = true;
+  panStart = {
+    x: event.clientX,
+    y: event.clientY,
+    panX: viewport.panX,
+    panY: viewport.panY,
+  };
+  canvas.classList.add("is-panning");
+}
+
+function stopPointerWork() {
+  isDrawing = false;
+  isPanning = false;
+  lastPoint = null;
+  panStart = null;
+  canvas.classList.remove("is-panning");
 }
 
 canvas.addEventListener("pointerdown", (event) => {
   if (!img) return;
   canvas.setPointerCapture(event.pointerId);
+  computeView();
+  if (event.button === 1 || event.button === 2 || event.altKey) {
+    event.preventDefault();
+    startPan(event);
+    return;
+  }
+  if (event.button !== 0) return;
   const point = screenToImage(event);
   if (mode === "baseline") {
+    archiveCurrentFitForComparison();
+    const previous = clonePoints(baseline);
     if (baseline.length >= 2) baseline = [];
-    baseline.push(point);
-    currentFit = null;
-    saveBtn.disabled = true;
+    baseline.push(clonePoint(point));
+    pushHistory({ type: "baseline:set", previous, next: clonePoints(baseline) });
+    invalidateCurrentFit();
+    syncActiveRecord();
     draw();
     return;
   }
@@ -131,14 +579,21 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
-  if (!isDrawing || mode !== "trace" || !img) return;
+  if (!img) return;
+  if (isPanning && panStart) {
+    viewport.panX = panStart.panX + event.clientX - panStart.x;
+    viewport.panY = panStart.panY + event.clientY - panStart.y;
+    syncActiveRecord();
+    draw();
+    return;
+  }
+  if (!isDrawing || mode !== "trace") return;
   addTracePoint(screenToImage(event));
 });
 
-canvas.addEventListener("pointerup", () => {
-  isDrawing = false;
-  lastPoint = null;
-});
+canvas.addEventListener("pointerup", stopPointerWork);
+canvas.addEventListener("pointercancel", stopPointerWork);
+canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
 function drawPolyline(points, color, width = 2) {
   if (points.length < 2) return;
@@ -165,31 +620,88 @@ function drawPoints(points, color, radius = 3) {
   });
 }
 
-function localToScreen(x, y) {
-  const [a, b] = baseline;
+function makeLocalFrame(sourceBaseline = baseline, sourceTrace = trace) {
+  if (sourceBaseline.length !== 2) return null;
+  const [a, b] = sourceBaseline;
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const length = Math.hypot(dx, dy);
+  if (length < 2) return null;
   const ux = { x: dx / length, y: dy / length };
   const n1 = { x: -ux.y, y: ux.x };
-  const median = trace.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
-  median.x = median.x / Math.max(trace.length, 1) - a.x;
-  median.y = median.y / Math.max(trace.length, 1) - a.y;
+  const median = sourceTrace.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+  median.x = median.x / Math.max(sourceTrace.length, 1) - a.x;
+  median.y = median.y / Math.max(sourceTrace.length, 1) - a.y;
   const sign = median.x * n1.x + median.y * n1.y >= 0 ? 1 : -1;
-  const normal = { x: n1.x * sign, y: n1.y * sign };
-  return imageToScreen({ x: a.x + x * ux.x + y * normal.x, y: a.y + x * ux.y + y * normal.y });
+  return {
+    origin: a,
+    ux,
+    normal: { x: n1.x * sign, y: n1.y * sign },
+  };
 }
 
-function drawFitOverlay() {
-  if (!currentFit || baseline.length !== 2) return;
-  const fit = currentFit.fit === "ellipse" && currentFit.ellipse ? currentFit.ellipse : currentFit.circle;
-  ctx.strokeStyle = "rgba(31, 122, 101, 0.95)";
-  ctx.lineWidth = 2;
+function localToImage(x, y, frame) {
+  return {
+    x: frame.origin.x + x * frame.ux.x + y * frame.normal.x,
+    y: frame.origin.y + x * frame.ux.y + y * frame.normal.y,
+  };
+}
+
+function localToScreen(x, y, frame) {
+  return imageToScreen(localToImage(x, y, frame));
+}
+
+function ellipseSlope(fit, x, y = 0) {
+  const cosP = Math.cos(fit.phi);
+  const sinP = Math.sin(fit.phi);
+  const xr = (x - fit.cx) * cosP + (y - fit.cy) * sinP;
+  const yr = -(x - fit.cx) * sinP + (y - fit.cy) * cosP;
+  const dfdx = (2 * xr * cosP) / (fit.a * fit.a) - (2 * yr * sinP) / (fit.b * fit.b);
+  const dfdy = (2 * xr * sinP) / (fit.a * fit.a) + (2 * yr * cosP) / (fit.b * fit.b);
+  if (Math.abs(dfdy) < 1e-9) return Infinity;
+  return -dfdx / dfdy;
+}
+
+function tangentSlope(fit, contactX) {
+  if (fit.kind === "ellipse") return ellipseSlope(fit, contactX);
+  return -(contactX - fit.cx) / (0 - fit.cy);
+}
+
+function drawTangentAt(fit, contactX, frame) {
+  const slope = tangentSlope(fit, contactX);
+  const span = Math.max(1, Math.abs(fit.contact_right - fit.contact_left));
+  const halfLength = Math.max(16 / view.scale, Math.min(90, span * 0.24));
+  let dx = 0;
+  let dy = halfLength;
+  if (Number.isFinite(slope)) {
+    const norm = Math.hypot(1, slope);
+    dx = halfLength / norm;
+    dy = (slope * halfLength) / norm;
+  }
+  const p1 = localToScreen(contactX - dx, -dy, frame);
+  const p2 = localToScreen(contactX + dx, dy, frame);
+  ctx.moveTo(p1.x, p1.y);
+  ctx.lineTo(p2.x, p2.y);
+}
+
+function drawFitOverlayFor(fitResult, sourceBaseline, sourceTrace, style = {}) {
+  if (!fitResult || sourceBaseline.length !== 2) return;
+  const frame = makeLocalFrame(sourceBaseline, sourceTrace);
+  if (!frame) return;
+  const fit = fitResult.fit === "ellipse" && fitResult.ellipse ? fitResult.ellipse : fitResult.circle;
+  const curveColor = style.curveColor || "rgba(31, 122, 101, 0.95)";
+  const tangentColor = style.tangentColor || "rgba(255, 112, 67, 0.98)";
+  const pointColor = style.pointColor || "#b24f34";
+  const width = style.width || 2;
+
+  ctx.strokeStyle = curveColor;
+  ctx.lineWidth = width;
+  ctx.setLineDash([]);
   ctx.beginPath();
   if (fit.kind === "circle") {
     for (let i = 0; i <= 160; i += 1) {
       const t = (Math.PI * 2 * i) / 160;
-      const p = localToScreen(fit.cx + fit.radius * Math.cos(t), fit.cy + fit.radius * Math.sin(t));
+      const p = localToScreen(fit.cx + fit.radius * Math.cos(t), fit.cy + fit.radius * Math.sin(t), frame);
       if (i === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
     }
@@ -200,16 +712,25 @@ function drawFitOverlay() {
       const yp = fit.b * Math.sin(t);
       const x = fit.cx + xp * Math.cos(fit.phi) - yp * Math.sin(fit.phi);
       const y = fit.cy + xp * Math.sin(fit.phi) + yp * Math.cos(fit.phi);
-      const p = localToScreen(x, y);
+      const p = localToScreen(x, y, frame);
       if (i === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
     }
   }
   ctx.stroke();
 
-  const left = localToScreen(fit.contact_left, 0);
-  const right = localToScreen(fit.contact_right, 0);
-  ctx.fillStyle = "#b24f34";
+  ctx.strokeStyle = tangentColor;
+  ctx.lineWidth = style.tangentWidth || 2.2;
+  ctx.setLineDash(style.tangentDash || [8, 5]);
+  ctx.beginPath();
+  drawTangentAt(fit, fit.contact_left, frame);
+  drawTangentAt(fit, fit.contact_right, frame);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const left = localToScreen(fit.contact_left, 0, frame);
+  const right = localToScreen(fit.contact_right, 0, frame);
+  ctx.fillStyle = pointColor;
   [left, right].forEach((p) => {
     ctx.beginPath();
     ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
@@ -217,14 +738,61 @@ function drawFitOverlay() {
   });
 }
 
+function drawFitOverlay() {
+  drawFitOverlayFor(currentFit, baseline, trace);
+}
+
+function drawPreviousFits() {
+  previousFits.forEach((snapshot) => {
+    drawPolyline(snapshot.trace, "rgba(194, 196, 188, 0.5)", 2);
+    drawPoints(snapshot.trace.filter((_, i) => i % 10 === 0), "rgba(210, 211, 204, 0.42)", 2);
+    drawPolyline(snapshot.baseline, "rgba(160, 172, 178, 0.58)", 2.2);
+    drawPoints(snapshot.baseline, "rgba(190, 198, 202, 0.62)", 4);
+    drawFitOverlayFor(snapshot.fit, snapshot.baseline, snapshot.trace, {
+      curveColor: "rgba(180, 187, 174, 0.58)",
+      tangentColor: "rgba(202, 176, 108, 0.58)",
+      pointColor: "rgba(178, 166, 142, 0.66)",
+      width: 1.6,
+      tangentWidth: 1.6,
+      tangentDash: [6, 6],
+    });
+  });
+}
+
+function thresholdCanvasForActiveImage() {
+  const record = activeRecord();
+  if (!record || !img) return img;
+  if (record.thresholdCache?.value === thresholdValue) return record.thresholdCache.canvas;
+
+  const source = document.createElement("canvas");
+  source.width = img.width;
+  source.height = img.height;
+  const sourceCtx = source.getContext("2d", { willReadFrequently: true });
+  sourceCtx.drawImage(img, 0, 0);
+  const imageData = sourceCtx.getImageData(0, 0, source.width, source.height);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const luminance = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+    const value = luminance >= thresholdValue ? 255 : 0;
+    data[i] = value;
+    data[i + 1] = value;
+    data[i + 2] = value;
+    data[i + 3] = 255;
+  }
+  sourceCtx.putImageData(imageData, 0, 0);
+  record.thresholdCache = { value: thresholdValue, canvas: source };
+  return source;
+}
+
 function draw() {
   computeView();
   ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
   if (!img) return;
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(img, view.ox, view.oy, view.width, view.height);
-  ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+  ctx.drawImage(thresholdEnabled ? thresholdCanvasForActiveImage() : img, view.ox, view.oy, view.width, view.height);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.24)";
   ctx.fillRect(view.ox, view.oy, view.width, view.height);
+  drawPreviousFits();
   drawPolyline(trace, "#f1c84b", 2.5);
   drawPoints(trace.filter((_, i) => i % 8 === 0), "#fff1a6", 2.5);
   drawPolyline(baseline, "#2580c3", 3);
@@ -237,22 +805,36 @@ function format(value, places = 2) {
   return Number(value).toFixed(places);
 }
 
+function selectedResidual(run) {
+  if (run.fit === "ellipse" && run.ellipse) return run.ellipse.residual_stdev;
+  return run.circle?.residual_stdev;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 function renderFit(result) {
   fitSummary.classList.remove("muted");
   const ellipse = result.ellipse;
   const circle = result.circle;
   fitSummary.innerHTML = `
     <div class="metric"><span>Selected model</span><b>${result.fit}</b></div>
-    <div class="metric"><span>Mean angle</span><b>${format(result.theta_mean)}°</b></div>
-    <div class="metric"><span>Left / right</span><b>${format(result.theta_left)}° / ${format(result.theta_right)}°</b></div>
+    <div class="metric"><span>Mean angle</span><b>${format(result.theta_mean)}&deg;</b></div>
+    <div class="metric"><span>Left / right</span><b>${format(result.theta_left)}&deg; / ${format(result.theta_right)}&deg;</b></div>
     <div class="metric"><span>Contact width</span><b>${format(result.contact_width_px)} px</b></div>
     <div class="metric"><span>Circle residual</span><b>${format(circle.residual_stdev, 3)}</b></div>
     <div class="metric"><span>Ellipse residual</span><b>${ellipse ? format(ellipse.residual_stdev, 3) : "n/a"}</b></div>
   `;
 }
 
-fitBtn.addEventListener("click", async () => {
-  if (!img) return;
+async function fitCurrent() {
+  if (!img || fitBtn.disabled) return;
   const payload = {
     imageName,
     label: runLabel.value || `Run ${runs.length + 1}`,
@@ -269,8 +851,10 @@ fitBtn.addEventListener("click", async () => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Fit failed.");
     currentFit = result;
+    pendingFit = true;
     renderFit(result);
     saveBtn.disabled = false;
+    syncActiveRecord();
     draw();
   } catch (error) {
     fitSummary.classList.add("muted");
@@ -278,69 +862,186 @@ fitBtn.addEventListener("click", async () => {
   } finally {
     fitBtn.disabled = false;
   }
-});
+}
 
-saveBtn.addEventListener("click", () => {
-  if (!currentFit) return;
-  runs.push({ ...currentFit, label: runLabel.value || currentFit.label });
+fitBtn.addEventListener("click", fitCurrent);
+
+function saveCurrentRun() {
+  if (!currentFit || saveBtn.disabled) return;
+  runs.push({
+    ...currentFit,
+    label: runLabel.value || currentFit.label,
+    saved_at: new Date().toISOString(),
+  });
+  pendingFit = false;
+  syncActiveRecord();
   renderRuns();
+  renderImageList();
   runLabel.value = `Run ${runs.length + 1}`;
   saveBtn.disabled = true;
-});
+  syncActiveRecord();
+}
 
-function renderRuns() {
-  runsBody.innerHTML = runs.map((run) => `
-    <tr>
-      <td>${run.label}</td>
-      <td>${run.fit}</td>
-      <td>${format(run.theta_left)}</td>
-      <td>${format(run.theta_right)}</td>
-      <td>${format(run.theta_mean)}</td>
-      <td>${run.point_count}</td>
-    </tr>
+saveBtn.addEventListener("click", saveCurrentRun);
+
+function updateRunControls() {
+  const disabled = allRuns().length === 0;
+  exportBtn.disabled = disabled;
+  exportTableBtn.disabled = disabled;
+}
+
+function renderImageList() {
+  if (!images.length) {
+    imageList.innerHTML = `<div class="image-empty">No images loaded.</div>`;
+    return;
+  }
+  imageList.innerHTML = images.map((record) => `
+    <div class="image-row ${record.id === activeImageId ? "active" : ""}">
+      <button class="image-select" data-image-id="${record.id}" title="${escapeHtml(record.name)}">
+        <strong>${escapeHtml(record.name)}</strong>
+        <span>${record.runs.length} saved row${record.runs.length === 1 ? "" : "s"}</span>
+      </button>
+      <button class="remove-image" data-remove-image="${record.id}" title="Remove image" aria-label="Remove image">x</button>
+    </div>
   `).join("");
 }
 
-newTraceBtn.addEventListener("click", () => {
+function renderRuns() {
+  const active = activeRecord();
+  activeResultsLabel.textContent = active ? `Showing rows for ${active.name}` : "No active image";
+  activeResultsLabel.title = active?.name || "";
+  runsBody.innerHTML = runs.map((run, index) => `
+    <tr>
+      <td>${escapeHtml(run.label)}</td>
+      <td>${run.fit}</td>
+      <td>${format(run.theta_mean)}</td>
+      <td>${format(run.theta_left)}</td>
+      <td>${format(run.theta_right)}</td>
+      <td>${format(run.contact_width_px, 1)}</td>
+      <td>${format(selectedResidual(run), 3)}</td>
+      <td>${run.point_count}</td>
+      <td><button class="delete-run" data-delete-run="${index}" title="Delete row" aria-label="Delete row">x</button></td>
+    </tr>
+  `).join("");
+  updateRunControls();
+}
+
+imageList.addEventListener("click", (event) => {
+  const selectButton = event.target.closest("[data-image-id]");
+  const removeButton = event.target.closest("[data-remove-image]");
+  if (removeButton) {
+    const id = removeButton.dataset.removeImage;
+    syncActiveRecord();
+    const index = images.findIndex((record) => record.id === id);
+    if (index < 0) return;
+    images.splice(index, 1);
+    if (id === activeImageId) {
+      const next = images[images.length - 1];
+      if (next) switchToImage(next.id);
+      else clearActiveImage();
+    } else {
+      renderImageList();
+      updateRunControls();
+    }
+    return;
+  }
+  if (selectButton) {
+    switchToImage(selectButton.dataset.imageId);
+  }
+});
+
+runsBody.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-delete-run]");
+  if (!button) return;
+  runs.splice(Number(button.dataset.deleteRun), 1);
+  syncActiveRecord();
+  renderRuns();
+  renderImageList();
+  runLabel.value = `Run ${runs.length + 1}`;
+  syncActiveRecord();
+});
+
+function startNewTrace() {
+  archiveCurrentFitForComparison();
   trace = [];
-  currentFit = null;
-  saveBtn.disabled = true;
+  undoStack = [];
+  redoStack = [];
+  invalidateCurrentFit();
   fitSummary.classList.add("muted");
   fitSummary.textContent = "No fit yet.";
+  syncActiveRecord();
   draw();
-});
+}
 
-undoBtn.addEventListener("click", () => {
-  if (mode === "baseline" && baseline.length) baseline.pop();
-  else trace.pop();
-  currentFit = null;
-  saveBtn.disabled = true;
+newTraceBtn.addEventListener("click", startNewTrace);
+
+undoBtn.addEventListener("click", undoPoint);
+
+function clearPreviousFits() {
+  previousFits = [];
+  updateComparisonControls();
+  syncActiveRecord();
   draw();
-});
+}
 
-clearBtn.addEventListener("click", () => {
+clearFitsBtn.addEventListener("click", clearPreviousFits);
+
+function clearDrawing() {
+  archiveCurrentFitForComparison();
   trace = [];
   baseline = [];
-  currentFit = null;
-  saveBtn.disabled = true;
+  undoStack = [];
+  redoStack = [];
+  invalidateCurrentFit();
+  syncActiveRecord();
   draw();
-});
+}
 
-exportBtn.addEventListener("click", () => {
-  if (!runs.length) return;
+clearBtn.addEventListener("click", clearDrawing);
+
+function exportRuns() {
+  syncActiveRecord();
+  const exportRows = allRuns();
+  if (!exportRows.length) return;
   const headers = [
-    "image_name", "label", "fit", "theta_left", "theta_right", "theta_mean",
-    "contact_width_px", "baseline_length_px", "point_count",
-    "circle_radius", "circle_residual_stdev", "ellipse_a", "ellipse_b",
-    "ellipse_eccentricity", "ellipse_residual_stdev"
+    "image_name",
+    "label",
+    "fit",
+    "theta_mean_deg",
+    "theta_left_deg",
+    "theta_right_deg",
+    "contact_width_px",
+    "baseline_length_px",
+    "point_count",
+    "selected_residual_stdev",
+    "circle_radius",
+    "circle_residual_stdev",
+    "ellipse_a",
+    "ellipse_b",
+    "ellipse_eccentricity",
+    "ellipse_residual_stdev",
+    "saved_at",
   ];
-  const rows = runs.map((run) => {
+  const rows = exportRows.map((run) => {
     const ellipse = run.ellipse || {};
     return [
-      run.image_name, run.label, run.fit, run.theta_left, run.theta_right, run.theta_mean,
-      run.contact_width_px, run.baseline_length_px, run.point_count,
-      run.circle.radius, run.circle.residual_stdev, ellipse.a, ellipse.b,
-      ellipse.eccentricity, ellipse.residual_stdev
+      run.image_name,
+      run.label,
+      run.fit,
+      run.theta_mean,
+      run.theta_left,
+      run.theta_right,
+      run.contact_width_px,
+      run.baseline_length_px,
+      run.point_count,
+      selectedResidual(run),
+      run.circle.radius,
+      run.circle.residual_stdev,
+      ellipse.a,
+      ellipse.b,
+      ellipse.eccentricity,
+      ellipse.residual_stdev,
+      run.saved_at,
     ];
   });
   const csv = [headers, ...rows].map((row) => row.map((cell) => {
@@ -349,8 +1050,79 @@ exportBtn.addEventListener("click", () => {
   }).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const link = document.createElement("a");
+  const baseName = images.length > 1 ? "session" : imageName.replace(/\.[^.]+$/, "").replace(/[^a-z0-9_-]+/gi, "-") || "image";
   link.href = URL.createObjectURL(blob);
-  link.download = "contact-angle-runs.csv";
+  link.download = `contact-angle-${baseName}.csv`;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+exportBtn.addEventListener("click", exportRuns);
+exportTableBtn.addEventListener("click", exportRuns);
+
+window.addEventListener("keydown", (event) => {
+  const key = event.key.toLowerCase();
+  const inFormControl = isFormControl(event.target);
+
+  if (event.key === "Shift" && !event.repeat && !inFormControl) {
+    beginHeldMode(selectedMode === "baseline" ? "trace" : "baseline");
+    return;
+  }
+
+  if (!inFormControl && event.ctrlKey && !event.shiftKey && key === "z") {
+    event.preventDefault();
+    undoPoint();
+    return;
+  }
+
+  if (!inFormControl && event.altKey && key === "z") {
+    event.preventDefault();
+    redoPoint();
+    return;
+  }
+
+  if (inFormControl || event.ctrlKey || event.metaKey || event.altKey) return;
+
+  if (event.key === "Enter") {
+    event.preventDefault();
+    saveCurrentRun();
+  } else if (key === "f") {
+    event.preventDefault();
+    fitCurrent();
+  } else if (key === "n") {
+    event.preventDefault();
+    startNewTrace();
+  } else if (key === "t") {
+    event.preventDefault();
+    toggleThresholdView();
+  } else if (key === "e") {
+    event.preventDefault();
+    exportRuns();
+  } else if (event.key === "+" || event.key === "=") {
+    event.preventDefault();
+    zoomAt(1.25);
+  } else if (event.key === "-" || event.key === "_") {
+    event.preventDefault();
+    zoomAt(0.8);
+  } else if (event.key === "0") {
+    event.preventDefault();
+    resetViewport();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    heldMode = null;
+    heldModeReturn = null;
+    setMode("trace");
+    syncActiveRecord();
+  }
+});
+
+window.addEventListener("keyup", (event) => {
+  if (event.key === "Shift" && heldMode) endHeldMode(heldMode);
+});
+
+window.addEventListener("blur", () => {
+  if (!heldMode) return;
+  heldMode = null;
+  heldModeReturn = null;
+  setMode("trace");
 });

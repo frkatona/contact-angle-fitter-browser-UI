@@ -14,21 +14,34 @@
           <h1>Workbench</h1>
         </div>
         <label class="file-picker">
-          <input id="imageInput" type="file" accept="image/*">
+          <input id="imageInput" type="file" accept="image/*" multiple>
           <span>Load image</span>
         </label>
+        <div id="imageNameDisplay" class="image-name-display">No image loaded</div>
         <div class="segmented" role="group" aria-label="Drawing mode">
           <button class="mode active" data-mode="trace" title="Trace droplet boundary">Trace</button>
           <button class="mode" data-mode="baseline" title="Pick the solid baseline">Baseline</button>
+        </div>
+        <div class="zoom-controls" aria-label="Zoom controls">
+          <button id="zoomOutBtn" title="Zoom out">-</button>
+          <button id="zoomResetBtn" title="Fit image to view"><span id="zoomLevel">100%</span></button>
+          <button id="zoomInBtn" title="Zoom in">+</button>
         </div>
         <div class="controls">
           <label>
             Run label
             <input id="runLabel" value="Run 1">
           </label>
-          <label>
+          <label class="range-label" title="Minimum image-pixel distance between captured trace points. Lower values make denser traces.">
             Brush spacing
-            <input id="spacing" type="range" min="2" max="16" value="5">
+            <span class="range-wrap">
+              <input id="spacing" type="range" min="2" max="16" value="5" title="Minimum image-pixel distance between captured trace points. Lower values make denser traces.">
+              <span id="spacingBubble" class="range-bubble">5</span>
+            </span>
+          </label>
+          <label id="thresholdControl" class="threshold-control">
+            Threshold
+            <input id="thresholdInput" type="number" min="0" max="255" value="128">
           </label>
         </div>
         <div class="actions">
@@ -36,8 +49,25 @@
           <button id="saveBtn" disabled>Save Run</button>
           <button id="newTraceBtn">New Trace</button>
           <button id="undoBtn">Undo Point</button>
+          <button id="clearFitsBtn" disabled title="Remove archived comparison fit overlays">Clear Previous Fits</button>
           <button id="clearBtn">Clear</button>
           <button id="exportBtn">Export CSV</button>
+        </div>
+        <div class="hotkey-help" tabindex="0" aria-label="Keyboard shortcuts">
+          <span class="hotkey-trigger">?</span>
+          <div class="hotkey-popover" role="tooltip">
+            <div><kbd>Shift</kbd><span>hold opposite mode</span></div>
+            <div><kbd>Right mouse</kbd><span>pan</span></div>
+            <div><kbd>F</kbd><span>fit</span></div>
+            <div><kbd>Enter</kbd><span>save run</span></div>
+            <div><kbd>N</kbd><span>new trace</span></div>
+            <div><kbd>Ctrl</kbd><kbd>Z</kbd><span>undo point</span></div>
+            <div><kbd>Alt</kbd><kbd>Z</kbd><span>redo point</span></div>
+            <div><kbd>T</kbd><span>threshold view</span></div>
+            <div><kbd>+ / -</kbd><span>zoom</span></div>
+            <div><kbd>0</kbd><span>reset view</span></div>
+            <div><kbd>E</kbd><span>export csv</span></div>
+          </div>
         </div>
       </aside>
 
@@ -57,17 +87,27 @@
           <div id="fitSummary" class="summary muted">No fit yet.</div>
         </section>
         <section>
-          <p class="eyebrow">Runs</p>
+          <div class="section-head">
+            <p class="eyebrow">Output Values</p>
+            <button id="exportTableBtn" title="Export output table">Export</button>
+          </div>
+          <div id="imageList" class="image-list">
+            <div class="image-empty">No images loaded.</div>
+          </div>
+          <div id="activeResultsLabel" class="active-results-label">No active image</div>
           <div class="table-wrap">
-            <table>
+            <table class="output-table">
               <thead>
                 <tr>
                   <th>Label</th>
                   <th>Fit</th>
-                  <th>Theta L</th>
-                  <th>Theta R</th>
                   <th>Mean</th>
+                  <th>Left</th>
+                  <th>Right</th>
+                  <th>Width</th>
+                  <th>Residual</th>
                   <th>Pts</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody id="runsBody"></tbody>
@@ -76,6 +116,9 @@
         </section>
       </aside>
     </main>
+    <div id="dropOverlay" class="drop-overlay">
+      <div>Drop image files to load</div>
+    </div>
     <script src="app.js"></script>
   </body>
 </html>
