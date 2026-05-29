@@ -250,8 +250,7 @@ input:not([type]) {
   min-height: 38px;
 }
 
-.actions button:first-child,
-.actions button:nth-child(2) {
+.actions button:first-child {
   background: var(--accent);
   border-color: var(--accent);
   color: white;
@@ -559,6 +558,14 @@ td {
 th:first-child,
 td:first-child {
   text-align: left;
+}
+
+.output-table tbody tr {
+  transition: background 120ms ease;
+}
+
+.output-table tbody tr.run-hover {
+  background: #fff7d6;
 }
 
 th {
