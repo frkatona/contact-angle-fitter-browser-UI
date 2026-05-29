@@ -73,21 +73,21 @@ This approach is useful for noisy microscope or goniometer images where full aut
 
 ## Fitting Methods
 
-Let the user-selected baseline endpoints be \(\mathbf{b}_0\) and \(\mathbf{b}_1\), and let the traced droplet boundary points be \(\mathbf{p}_i\). The backend first defines a baseline-aligned coordinate frame
+Let the user-selected baseline endpoints be $(\mathbf{b}_0)$ and $(\mathbf{b}_1)$, and let the traced droplet boundary points be $(\mathbf{p}_i)$. The backend first defines a baseline-aligned coordinate frame
 
-\[
+$$
 \mathbf{u} = \frac{\mathbf{b}_1-\mathbf{b}_0}{\lVert \mathbf{b}_1-\mathbf{b}_0 \rVert},
 \qquad
 \mathbf{n} \perp \mathbf{u},
-\]
+$$
 
-where \(\mathbf{n}\) is chosen to point toward the traced droplet. Each trace point is transformed as
+where $(\mathbf{n})$ is chosen to point toward the traced droplet. Each trace point is transformed as
 
-\[
+$$
 x_i = (\mathbf{p}_i-\mathbf{b}_0)\cdot\mathbf{u},
 \qquad
 y_i = (\mathbf{p}_i-\mathbf{b}_0)\cdot\mathbf{n}.
-\]
+$$
 
 Points substantially below the baseline are discarded, so fitting is performed on the droplet-side contour. The contact line is then the local \(y=0\) axis. Both the circular and elliptical fits are computed in this local frame.
 
@@ -95,49 +95,49 @@ Points substantially below the baseline are discarded, so fitting is performed o
 
 The circular model assumes the traced boundary is part of
 
-\[
+$$
 (x-c_x)^2 + (y-c_y)^2 = r^2.
-\]
+$$
 
 The implementation solves this as a linear least-squares problem by expanding the circle equation:
 
-\[
+$$
 x_i^2 + y_i^2 = 2c_x x_i + 2c_y y_i + c,
 \qquad
 r = \sqrt{c + c_x^2 + c_y^2}.
-\]
+$$
 
 After the first solve, radial residuals are computed as
 
-\[
+$$
 \epsilon_i = \sqrt{(x_i-c_x)^2 + (y_i-c_y)^2} - r.
-\]
+$$
 
 When enough points are available, a median absolute deviation filter removes strong outliers and the circle is refit. This makes repeated manual traces more tolerant of occasional points on glare, the needle, or the substrate.
 
 The contact points are the intersections between the circle and the baseline:
 
-\[
+$$
 x_{L,R} = c_x \pm \sqrt{r^2-c_y^2},
 \qquad
 y=0.
-\]
+$$
 
 At either contact point \(x_c\), the tangent slope follows from implicit differentiation:
 
-\[
+$$
 m = -\frac{x_c-c_x}{0-c_y}.
-\]
+$$
 
 The reported contact angle is the inner angle measured through the droplet phase. With
 
-\[
+$$
 \alpha = \tan^{-1}(|m|),
-\]
+$$
 
 the app uses the left and right contact-line orientation to choose the droplet-side angle:
 
-\[
+$$
 \theta_L =
 \begin{cases}
 \alpha, & m \ge 0,\\
@@ -149,31 +149,31 @@ the app uses the left and right contact-line orientation to choose the droplet-s
 \alpha, & m \le 0,\\
 180^\circ-\alpha, & m > 0.
 \end{cases}
-\]
+$$
 
 The displayed mean contact angle is
 
-\[
+$$
 \theta_C = \frac{\theta_L+\theta_R}{2}.
-\]
+$$
 
 ### Elliptical Fit
 
 The elliptical model allows the droplet contour to deviate from circular curvature:
 
-\[
+$$
 \left(\frac{x_r}{a}\right)^2 + \left(\frac{y_r}{b}\right)^2 = 1,
-\]
+$$
 
 where
 
-\[
+$$
 x_r = (x-c_x)\cos\phi + (y-c_y)\sin\phi,
-\]
+$$
 
-\[
+$$
 y_r = -(x-c_x)\sin\phi + (y-c_y)\cos\phi.
-\]
+$$
 
 The fitted parameters are the center \((c_x,c_y)\), semi-axes \(a\) and \(b\), and rotation \(\phi\). The optimizer is initialized from the circular fit and the principal components of the traced points. It then minimizes the algebraic residual
 
@@ -213,6 +213,7 @@ otherwise select the circle. Here \(\sigma\) is the standard deviation of the mo
 One implementation detail is worth noting for scientific use: the circular residual is a radial distance residual in pixels, while the current ellipse residual is algebraic and dimensionless. The heuristic is therefore practical rather than a formal statistical model comparison. A future publication-grade version should compare models using a common geometric error metric, cross-validation, bootstrap uncertainty, or criteria such as AIC/BIC computed from comparable likelihood assumptions.
 
 ### sending to mac
+
 ```
 docker build -t contact-angle-workbench:latest .
 docker save -o contact-angle-workbench.tar contact-angle-workbench:latest
