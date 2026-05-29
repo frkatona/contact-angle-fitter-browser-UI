@@ -211,3 +211,16 @@ When both models are available, the current selection rule is a conservative res
 otherwise select the circle. Here \(\sigma\) is the standard deviation of the model residuals returned by the backend. This rule favors the simpler circular model unless the ellipse is meaningfully better for the current trace, reducing the chance that small manual-tracing variations cause an unnecessarily complex fit to be selected.
 
 One implementation detail is worth noting for scientific use: the circular residual is a radial distance residual in pixels, while the current ellipse residual is algebraic and dimensionless. The heuristic is therefore practical rather than a formal statistical model comparison. A future publication-grade version should compare models using a common geometric error metric, cross-validation, bootstrap uncertainty, or criteria such as AIC/BIC computed from comparable likelihood assumptions.
+
+### sending to mac
+```
+docker build -t contact-angle-workbench:latest .
+docker save -o contact-angle-workbench.tar contact-angle-workbench:latest
+```
+
+```
+docker load -i contact-angle-workbench.tar
+docker run --rm -p 8000:8000 contact-angle-workbench:latest
+```
+
+then open http://localhost:8000
