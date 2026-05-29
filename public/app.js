@@ -1,5 +1,6 @@
 const canvas = document.querySelector("#canvas");
 const ctx = canvas.getContext("2d");
+const app = document.querySelector(".app");
 const imageInput = document.querySelector("#imageInput");
 const imageNameDisplay = document.querySelector("#imageNameDisplay");
 const emptyState = document.querySelector("#emptyState");
@@ -24,6 +25,7 @@ const zoomResetBtn = document.querySelector("#zoomResetBtn");
 const zoomInBtn = document.querySelector("#zoomInBtn");
 const zoomLevel = document.querySelector("#zoomLevel");
 const dropOverlay = document.querySelector("#dropOverlay");
+const resizeHandles = document.querySelectorAll("[data-resize-panel]");
 
 let mode = "trace";
 let images = [];
@@ -50,9 +52,21 @@ let view = { scale: 1, fitScale: 1, ox: 0, oy: 0, width: 1, height: 1 };
 let viewport = { zoom: 1, panX: 0, panY: 0 };
 let heldMode = null;
 let heldModeReturn = null;
+let panelResize = null;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function applyStoredPanelSizes() {
+  const railWidth = Number(localStorage.getItem("contactAngleRailWidth"));
+  const panelWidth = Number(localStorage.getItem("contactAnglePanelWidth"));
+  if (Number.isFinite(railWidth) && railWidth > 0) {
+    app.style.setProperty("--rail-width", `${clamp(railWidth, 210, 420)}px`);
+  }
+  if (Number.isFinite(panelWidth) && panelWidth > 0) {
+    app.style.setProperty("--panel-width", `${clamp(panelWidth, 300, 620)}px`);
+  }
 }
 
 function setMode(nextMode, options = {}) {
@@ -249,6 +263,7 @@ function resizeCanvas() {
   draw();
 }
 
+applyStoredPanelSizes();
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 updateZoomLabel();
@@ -407,6 +422,53 @@ spacing.addEventListener("pointerup", hideSpacingBubble);
 spacing.addEventListener("pointercancel", hideSpacingBubble);
 spacing.addEventListener("focus", showSpacingBubble);
 spacing.addEventListener("blur", hideSpacingBubble);
+
+resizeHandles.forEach((handle) => {
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    panelResize = {
+      side: handle.dataset.resizePanel,
+      startX: event.clientX,
+      railWidth: document.querySelector(".rail").getBoundingClientRect().width,
+      panelWidth: document.querySelector(".panel").getBoundingClientRect().width,
+      handle,
+    };
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("active");
+    document.body.classList.add("resizing-panels");
+  });
+});
+
+window.addEventListener("pointermove", (event) => {
+  if (!panelResize) return;
+  const dx = event.clientX - panelResize.startX;
+  if (panelResize.side === "rail") {
+    const width = clamp(panelResize.railWidth + dx, 210, Math.min(420, window.innerWidth * 0.42));
+    app.style.setProperty("--rail-width", `${width}px`);
+    localStorage.setItem("contactAngleRailWidth", String(Math.round(width)));
+  } else {
+    const width = clamp(panelResize.panelWidth - dx, 300, Math.min(620, window.innerWidth * 0.52));
+    app.style.setProperty("--panel-width", `${width}px`);
+    localStorage.setItem("contactAnglePanelWidth", String(Math.round(width)));
+  }
+  resizeCanvas();
+});
+
+window.addEventListener("pointerup", () => {
+  if (!panelResize) return;
+  panelResize.handle.classList.remove("active");
+  document.body.classList.remove("resizing-panels");
+  panelResize = null;
+  resizeCanvas();
+});
+
+window.addEventListener("pointercancel", () => {
+  if (!panelResize) return;
+  panelResize.handle.classList.remove("active");
+  document.body.classList.remove("resizing-panels");
+  panelResize = null;
+  resizeCanvas();
+});
 
 function eventHasImageFiles(event) {
   const transfer = event.dataTransfer;
@@ -849,6 +911,15 @@ function selectedResidual(run) {
   return run.circle?.residual_stdev;
 }
 
+function circleContactWidth(run) {
+  if (!run.circle) return null;
+  return run.circle.contact_right - run.circle.contact_left;
+}
+
+function selectedFitDetails(run) {
+  return run.fit === "ellipse" && run.ellipse ? run.ellipse : run.circle;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -862,12 +933,23 @@ function renderFit(result) {
   fitSummary.classList.remove("muted");
   const ellipse = result.ellipse;
   const circle = result.circle;
+  const selected = selectedFitDetails(result);
+  const selectedWidth = selected ? selected.contact_right - selected.contact_left : result.contact_width_px;
+  const circleWidth = circle ? circle.contact_right - circle.contact_left : null;
   fitSummary.innerHTML = `
     <div class="metric"><span>Selected model</span><b>${result.fit}</b></div>
     <div class="metric"><span>Mean angle</span><b>${format(result.theta_mean)}&deg;</b></div>
     <div class="metric"><span>Left / right</span><b>${format(result.theta_left)}&deg; / ${format(result.theta_right)}&deg;</b></div>
-    <div class="metric"><span>Contact width</span><b>${format(result.contact_width_px)} px</b></div>
-    <div class="metric"><span>Circle residual</span><b>${format(circle.residual_stdev, 3)}</b></div>
+    <div class="metric"><span>Selected width</span><b>${format(selectedWidth)} px</b></div>
+    <div class="fit-subhead">Circle fit</div>
+    <div class="metric"><span>Mean angle</span><b>${format(circle.theta_mean)}&deg;</b></div>
+    <div class="metric"><span>Left / right</span><b>${format(circle.theta_left)}&deg; / ${format(circle.theta_right)}&deg;</b></div>
+    <div class="metric"><span>Width / radius</span><b>${format(circleWidth)} / ${format(circle.radius)}</b></div>
+    <div class="metric"><span>Residual</span><b>${format(circle.residual_stdev, 3)}</b></div>
+    <div class="fit-subhead">Ellipse fit</div>
+    <div class="metric"><span>Mean angle</span><b>${ellipse ? `${format(ellipse.theta_mean)}&deg;` : "n/a"}</b></div>
+    <div class="metric"><span>Left / right</span><b>${ellipse ? `${format(ellipse.theta_left)}&deg; / ${format(ellipse.theta_right)}&deg;` : "n/a"}</b></div>
+    <div class="metric"><span>a / b / e</span><b>${ellipse ? `${format(ellipse.a)} / ${format(ellipse.b)} / ${format(ellipse.eccentricity, 3)}` : "n/a"}</b></div>
     <div class="metric"><span>Ellipse residual</span><b>${ellipse ? format(ellipse.residual_stdev, 3) : "n/a"}</b></div>
   `;
 }
@@ -951,9 +1033,10 @@ function renderRuns() {
   activeResultsLabel.title = active?.name || "";
   runsBody.innerHTML = runs.map((run, index) => `
     <tr>
-      <td>${escapeHtml(run.label)}</td>
+      <td><input class="run-label-input" data-edit-run-label="${index}" value="${escapeHtml(run.label || `Run ${index + 1}`)}" aria-label="Run label"></td>
       <td>${run.fit}</td>
       <td>${format(run.theta_mean)}</td>
+      <td>${format(run.circle?.theta_mean)}</td>
       <td>${format(run.theta_left)}</td>
       <td>${format(run.theta_right)}</td>
       <td>${format(run.contact_width_px, 1)}</td>
@@ -1000,6 +1083,15 @@ runsBody.addEventListener("click", (event) => {
   syncActiveRecord();
 });
 
+runsBody.addEventListener("input", (event) => {
+  const input = event.target.closest("[data-edit-run-label]");
+  if (!input) return;
+  const index = Number(input.dataset.editRunLabel);
+  if (!runs[index]) return;
+  runs[index].label = input.value;
+  syncActiveRecord();
+});
+
 undoBtn.addEventListener("click", undoPoint);
 
 function clearPreviousFits() {
@@ -1039,8 +1131,17 @@ function exportRuns() {
     "baseline_length_px",
     "point_count",
     "selected_residual_stdev",
+    "circle_theta_mean_deg",
+    "circle_theta_left_deg",
+    "circle_theta_right_deg",
+    "circle_contact_width_px",
     "circle_radius",
+    "circle_points_used",
     "circle_residual_stdev",
+    "ellipse_theta_mean_deg",
+    "ellipse_theta_left_deg",
+    "ellipse_theta_right_deg",
+    "ellipse_contact_width_px",
     "ellipse_a",
     "ellipse_b",
     "ellipse_eccentricity",
@@ -1049,6 +1150,9 @@ function exportRuns() {
   ];
   const rows = exportRows.map((run) => {
     const ellipse = run.ellipse || {};
+    const ellipseWidth = ellipse.contact_right !== undefined && ellipse.contact_left !== undefined
+      ? ellipse.contact_right - ellipse.contact_left
+      : null;
     return [
       run.image_name,
       run.label,
@@ -1060,8 +1164,17 @@ function exportRuns() {
       run.baseline_length_px,
       run.point_count,
       selectedResidual(run),
+      run.circle.theta_mean,
+      run.circle.theta_left,
+      run.circle.theta_right,
+      circleContactWidth(run),
       run.circle.radius,
+      run.circle.points_used,
       run.circle.residual_stdev,
+      ellipse.theta_mean,
+      ellipse.theta_left,
+      ellipse.theta_right,
+      ellipseWidth,
       ellipse.a,
       ellipse.b,
       ellipse.eccentricity,
