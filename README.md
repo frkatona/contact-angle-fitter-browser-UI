@@ -34,7 +34,7 @@ docker compose up --build
 3. Choose **Trace** and drag or click along the visible droplet boundary.
 4. Use the mouse wheel or zoom controls for small droplets. Right mouse drag to pan without editing traces.
 5. Optionally press **T** to toggle a binary threshold view and adjust the threshold value in the workbench panel.
-6. Press **Fit** to compute circle and ellipse fits, draw the contact tangents, and add the measurement to the output table.
+6. Use the split **Fit** button to choose **Circle / ellipse** or **Young-Laplace**, then fit the trace and add the measurement to the output table.
 7. Repeat traces on the same image, or switch between loaded images in the output panel.
 8. Rename or delete rows, remove images as needed, then export CSV.
 
@@ -66,9 +66,9 @@ python visualize_contact_angle_data.py --input results.csv --group-by image_name
 
 ## Contact Angle Techniques
 
-Contact angle measurement usually starts by identifying the solid baseline and the visible liquid-air boundary. This app keeps that process user-guided: the user places the baseline, traces the droplet edge, and the backend fits the traced points in a baseline-aligned coordinate system. It currently compares circle and ellipse fits, then reports the left, right, and mean contact angles measured through the droplet phase from the tangent lines where the fitted curve intersects the baseline.
+Contact angle measurement usually starts by identifying the solid baseline and the visible liquid-air boundary. This app keeps that process user-guided: the user places the baseline, traces the droplet edge, and the backend fits the traced points in a baseline-aligned coordinate system. It can use the current circle/ellipse workflow or a Young-Laplace profile fit, then reports the left, right, and mean contact angles measured through the droplet phase from the tangent lines where the fitted curve intersects the baseline.
 
-This approach is useful for noisy microscope or goniometer images where full automation can choose the wrong edge. More advanced implementations could add automated edge detection, subpixel contour refinement, Young-Laplace fitting for gravity-distorted drops, calibration from known pixel-to-length scales, uncertainty estimates from repeated traces or bootstrap resampling, and batch processing across image sequences. Those additions would make the tool stronger for high-throughput or publication-grade measurements while preserving the current manual correction workflow.
+This approach is useful for noisy microscope or goniometer images where full automation can choose the wrong edge. More advanced implementations could add automated edge detection, subpixel contour refinement, calibration from known pixel-to-length scales, uncertainty estimates from repeated traces or bootstrap resampling, and batch processing across image sequences. Those additions would make the tool stronger for high-throughput or publication-grade measurements while preserving the current manual correction workflow.
 
 ## Fitting Methods
 
@@ -88,7 +88,7 @@ x_i = (\mathbf{p}_i-\mathbf{b}_0)\cdot\mathbf{u},
 y_i = (\mathbf{p}_i-\mathbf{b}_0)\cdot\mathbf{n}.
 $$
 
-Points substantially below the baseline are discarded, so fitting is performed on the droplet-side contour. The contact line is then the local \(y=0\) axis. Both the circular and elliptical fits are computed in this local frame.
+Points substantially below the baseline are discarded, so fitting is performed on the droplet-side contour. The contact line is then the local \(y=0\) axis. The circular, elliptical, and Young-Laplace fits are computed in this local frame.
 
 ### Circular Fit
 
@@ -196,9 +196,21 @@ The same droplet-side angle convention used for the circular fit is then applied
 e = \sqrt{1-\frac{\min(a,b)^2}{\max(a,b)^2}}.
 \]
 
+### Young-Laplace Fit
+
+The Young-Laplace option fits a symmetric axisymmetric droplet profile in the same local frame. The implementation integrates the dimensionless meridian equations from the apex to the contact point:
+
+\[
+\frac{dr}{ds} = \cos\psi,\qquad
+\frac{dz}{ds} = \sin\psi,\qquad
+\frac{d\psi}{ds} = 2 + Bz - \frac{\sin\psi}{r}.
+\]
+
+The optimized parameters are the centerline position, pixel scale, contact angle parameter, and dimensionless Bond-like coefficient \(B\). The solver is initialized from the circular fit, samples the resulting profile from left contact to right contact, and minimizes geometric point-to-polyline distance with a soft robust loss. This makes the method most appropriate for clean full-edge traces of gravity-distorted drops.
+
 ### Model Selection
 
-The selected model is determined automatically after both fits are attempted. The circular fit is always computed first. The elliptical fit is available only when SciPy is installed and at least 10 trace points are present. If the elliptical optimizer fails or the fitted ellipse does not intersect the baseline, the app uses the circular fit.
+For **Circle / ellipse**, the selected model is determined automatically after both conic fits are attempted. The circular fit is always computed first. The elliptical fit is available only when SciPy is installed and at least 10 trace points are present. If the elliptical optimizer fails or the fitted ellipse does not intersect the baseline, the app uses the circular fit. For **Young-Laplace**, the Young-Laplace profile is selected directly when its optimizer succeeds.
 
 When both models are available, the current selection rule is a conservative residual heuristic:
 

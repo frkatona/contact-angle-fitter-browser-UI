@@ -5,6 +5,9 @@ const imageInput = document.querySelector("#imageInput");
 const imageNameDisplay = document.querySelector("#imageNameDisplay");
 const emptyState = document.querySelector("#emptyState");
 const fitBtn = document.querySelector("#fitBtn");
+const fitMenuBtn = document.querySelector("#fitMenuBtn");
+const fitMenu = document.querySelector("#fitMenu");
+const fitChoiceLabel = document.querySelector("#fitChoiceLabel");
 const undoBtn = document.querySelector("#undoBtn");
 const clearBtn = document.querySelector("#clearBtn");
 const exportBtn = document.querySelector("#exportBtn");
@@ -50,6 +53,14 @@ let heldMode = null;
 let heldModeReturn = null;
 let panelResize = null;
 let hoveredRunIndex = null;
+let selectedFitType = localStorage.getItem("contactAngleFitType") || "conic";
+let protractorCursorEnabled = false;
+let protractorCursorPoint = null;
+
+const FIT_TYPES = {
+  conic: "Circle / ellipse",
+  "young-laplace": "Young-Laplace",
+};
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -210,6 +221,26 @@ function hideSpacingBubble() {
   spacing.parentElement.classList.remove("active");
 }
 
+function setFitType(nextType) {
+  selectedFitType = FIT_TYPES[nextType] ? nextType : "conic";
+  localStorage.setItem("contactAngleFitType", selectedFitType);
+  fitChoiceLabel.textContent = FIT_TYPES[selectedFitType];
+  fitMenu.querySelectorAll("[data-fit-type]").forEach((button) => {
+    const active = button.dataset.fitType === selectedFitType;
+    button.setAttribute("aria-checked", String(active));
+  });
+}
+
+function closeFitMenu() {
+  fitMenu.classList.remove("open");
+  fitMenuBtn.setAttribute("aria-expanded", "false");
+}
+
+function setFitControlsDisabled(disabled) {
+  fitBtn.disabled = disabled;
+  fitMenuBtn.disabled = disabled;
+}
+
 document.querySelectorAll(".mode").forEach((button) => {
   button.addEventListener("click", () => {
     setMode(button.dataset.mode);
@@ -218,6 +249,7 @@ document.querySelectorAll(".mode").forEach((button) => {
 });
 
 setMode(mode, { temporary: true });
+setFitType(selectedFitType);
 
 function updateZoomLabel() {
   zoomLevel.textContent = `${Math.round(viewport.zoom * 100)}%`;
@@ -590,6 +622,7 @@ function stopPointerWork() {
 
 canvas.addEventListener("pointerdown", (event) => {
   if (!img) return;
+  protractorCursorPoint = eventToCanvasPoint(event);
   canvas.setPointerCapture(event.pointerId);
   computeView();
   if (event.button === 1 || event.button === 2 || event.altKey) {
@@ -615,6 +648,7 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
+  protractorCursorPoint = eventToCanvasPoint(event);
   if (!img) return;
   if (isPanning && panStart) {
     viewport.panX = panStart.panX + event.clientX - panStart.x;
@@ -625,6 +659,7 @@ canvas.addEventListener("pointermove", (event) => {
   }
   if (!isDrawing) {
     setHoveredRunIndex(runOverlayAt(eventToCanvasPoint(event)));
+    if (protractorCursorEnabled) draw();
     return;
   }
   if (mode !== "trace") return;
@@ -634,7 +669,9 @@ canvas.addEventListener("pointermove", (event) => {
 canvas.addEventListener("pointerup", stopPointerWork);
 canvas.addEventListener("pointercancel", stopPointerWork);
 canvas.addEventListener("pointerleave", () => {
+  protractorCursorPoint = null;
   if (!isDrawing && !isPanning) setHoveredRunIndex(null);
+  if (protractorCursorEnabled) draw();
 });
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
@@ -706,6 +743,10 @@ function ellipseSlope(fit, x, y = 0) {
 }
 
 function tangentSlope(fit, contactX) {
+  if (fit.kind === "young-laplace") {
+    const midpoint = (fit.contact_left + fit.contact_right) * 0.5;
+    return contactX <= midpoint ? fit.slope_left : fit.slope_right;
+  }
   if (fit.kind === "ellipse") return ellipseSlope(fit, contactX);
   return -(contactX - fit.cx) / (0 - fit.cy);
 }
@@ -717,7 +758,12 @@ function tangentAngleThroughDrop(slope) {
 }
 
 function selectedFitDetails(run) {
+  if (run.fit === "young-laplace" && run.young_laplace) return run.young_laplace;
   return run.fit === "ellipse" && run.ellipse ? run.ellipse : run.circle;
+}
+
+function localSampleToScreen(sample, frame) {
+  return localToScreen(sample[0], sample[1], frame);
 }
 
 function tangentSegmentAt(fit, contactX, frame) {
@@ -779,7 +825,13 @@ function drawFitOverlayFor(fitResult, sourceBaseline, sourceTrace, style = {}) {
   ctx.lineWidth = width;
   ctx.setLineDash([]);
   ctx.beginPath();
-  if (fit.kind === "circle") {
+  if (fit.kind === "young-laplace" && fit.samples?.length) {
+    fit.samples.forEach((sample, index) => {
+      const p = localSampleToScreen(sample, frame);
+      if (index === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+  } else if (fit.kind === "circle") {
     for (let i = 0; i <= 160; i += 1) {
       const t = (Math.PI * 2 * i) / 160;
       const p = localToScreen(fit.cx + fit.radius * Math.cos(t), fit.cy + fit.radius * Math.sin(t), frame);
@@ -861,7 +913,9 @@ function drawSavedRunOverlays() {
 function fitCurveScreenPoints(fit, frame) {
   const points = [];
   if (!fit) return points;
-  if (fit.kind === "circle") {
+  if (fit.kind === "young-laplace" && fit.samples?.length) {
+    fit.samples.forEach((sample) => points.push(localSampleToScreen(sample, frame)));
+  } else if (fit.kind === "circle") {
     for (let i = 0; i <= 96; i += 1) {
       const t = (Math.PI * 2 * i) / 96;
       points.push(localToScreen(fit.cx + fit.radius * Math.cos(t), fit.cy + fit.radius * Math.sin(t), frame));
@@ -964,6 +1018,105 @@ function thresholdCanvasForActiveImage() {
   return source;
 }
 
+function setProtractorCursorEnabled(enabled) {
+  protractorCursorEnabled = enabled;
+  canvas.classList.toggle("protractor-cursor", protractorCursorEnabled);
+  draw();
+}
+
+function toggleProtractorCursor() {
+  setProtractorCursorEnabled(!protractorCursorEnabled);
+}
+
+function drawProtractorCursor() {
+  if (!protractorCursorEnabled || !protractorCursorPoint) return;
+  const cx = protractorCursorPoint.x;
+  const cy = protractorCursorPoint.y;
+  const outerRadius = 94;
+  const innerRadius = 38;
+  const frame = baseline.length === 2 ? makeLocalFrame(baseline, trace) : null;
+  const xAxis = frame ? frame.ux : { x: 1, y: 0 };
+  const yAxis = frame ? frame.normal : { x: 0, y: -1 };
+  const pointAt = (degrees, radius) => {
+    const radians = (degrees * Math.PI) / 180;
+    const radialX = Math.cos(radians) * xAxis.x + Math.sin(radians) * yAxis.x;
+    const radialY = Math.cos(radians) * xAxis.y + Math.sin(radians) * yAxis.y;
+    return {
+      x: cx + radialX * radius,
+      y: cy + radialY * radius,
+    };
+  };
+
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  ctx.beginPath();
+  for (let degrees = 180; degrees >= 0; degrees -= 2) {
+    const p = pointAt(degrees, outerRadius);
+    if (degrees === 180) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  }
+  for (let degrees = 0; degrees <= 180; degrees += 2) {
+    const p = pointAt(degrees, innerRadius);
+    ctx.lineTo(p.x, p.y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = "rgba(246, 248, 241, 0.34)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.68)";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(29, 36, 32, 0.62)";
+  ctx.lineWidth = 1;
+  for (let degrees = 0; degrees <= 180; degrees += 1) {
+    const major = degrees % 10 === 0;
+    const medium = degrees % 5 === 0;
+    const tickLength = major ? 13 : medium ? 9 : 5;
+    const p1 = pointAt(degrees, outerRadius);
+    const p2 = pointAt(degrees, outerRadius - tickLength);
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(178, 79, 52, 0.78)";
+  ctx.lineWidth = 1.4;
+  [0, 45, 90, 135, 180].forEach((degrees) => {
+    const p = pointAt(degrees, outerRadius - 18);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  });
+
+  ctx.fillStyle = "rgba(29, 36, 32, 0.84)";
+  ctx.font = "700 10px Inter, ui-sans-serif, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let degrees = 0; degrees <= 180; degrees += 30) {
+    const p = pointAt(degrees, outerRadius - 27);
+    ctx.fillText(String(degrees), p.x, p.y);
+  }
+
+  ctx.strokeStyle = "rgba(37, 128, 195, 0.78)";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(cx - xAxis.x * (outerRadius + 8), cy - xAxis.y * (outerRadius + 8));
+  ctx.lineTo(cx + xAxis.x * (outerRadius + 8), cy + xAxis.y * (outerRadius + 8));
+  ctx.moveTo(cx - yAxis.x * 10, cy - yAxis.y * 10);
+  ctx.lineTo(cx + yAxis.x * 10, cy + yAxis.y * 10);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(37, 128, 195, 0.9)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function draw() {
   computeView();
   ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
@@ -979,6 +1132,7 @@ function draw() {
     drawPolyline(baseline, "#2580c3", 3);
     drawPoints(baseline, "#d8efff", 5);
   }
+  drawProtractorCursor();
 }
 
 function format(value, places = 2) {
@@ -986,7 +1140,15 @@ function format(value, places = 2) {
   return Number(value).toFixed(places);
 }
 
+function formatFitName(fit) {
+  if (fit === "young-laplace") return "Young-Laplace";
+  if (fit === "ellipse") return "Ellipse";
+  if (fit === "circle") return "Circle";
+  return FIT_TYPES[fit] || fit;
+}
+
 function selectedResidual(run) {
+  if (run.fit === "young-laplace" && run.young_laplace) return run.young_laplace.residual_rms ?? run.young_laplace.residual_stdev;
   if (run.fit === "ellipse" && run.ellipse) return run.ellipse.residual_stdev;
   return run.circle?.residual_stdev;
 }
@@ -1009,10 +1171,12 @@ function renderFit(result) {
   fitSummary.classList.remove("muted");
   const ellipse = result.ellipse;
   const circle = result.circle;
+  const youngLaplace = result.young_laplace;
   const circleWidth = circle ? circle.contact_right - circle.contact_left : null;
   const ellipseWidth = ellipse ? ellipse.contact_right - ellipse.contact_left : null;
+  const youngLaplaceWidth = youngLaplace ? youngLaplace.contact_right - youngLaplace.contact_left : null;
   fitSummary.innerHTML = `
-    <div class="metric"><span>Selected model</span><b>${result.fit}</b></div>
+    <div class="metric"><span>Selected model</span><b>${formatFitName(result.fit)}</b></div>
     <div class="fit-subhead">Circle fit</div>
     <div class="metric"><span>Mean angle</span><b>${format(circle.theta_mean)}&deg;</b></div>
     <div class="metric"><span>Left / right</span><b>${format(circle.theta_left)}&deg; / ${format(circle.theta_right)}&deg;</b></div>
@@ -1024,19 +1188,26 @@ function renderFit(result) {
     <div class="metric"><span>Width</span><b>${ellipse ? `${format(ellipseWidth)} px` : "n/a"}</b></div>
     <div class="metric"><span>a / b / e</span><b>${ellipse ? `${format(ellipse.a)} / ${format(ellipse.b)} / ${format(ellipse.eccentricity, 3)}` : "n/a"}</b></div>
     <div class="metric"><span>Ellipse residual</span><b>${ellipse ? format(ellipse.residual_stdev, 3) : "n/a"}</b></div>
+    <div class="fit-subhead">Young-Laplace fit</div>
+    <div class="metric"><span>Mean angle</span><b>${youngLaplace ? `${format(youngLaplace.theta_mean)}&deg;` : "n/a"}</b></div>
+    <div class="metric"><span>Left / right</span><b>${youngLaplace ? `${format(youngLaplace.theta_left)}&deg; / ${format(youngLaplace.theta_right)}&deg;` : "n/a"}</b></div>
+    <div class="metric"><span>Width</span><b>${youngLaplace ? `${format(youngLaplaceWidth)} px` : "n/a"}</b></div>
+    <div class="metric"><span>Bond / scale</span><b>${youngLaplace ? `${format(youngLaplace.bond, 3)} / ${format(youngLaplace.scale_px)}` : "n/a"}</b></div>
+    <div class="metric"><span>YL RMS residual</span><b>${youngLaplace ? format(youngLaplace.residual_rms, 3) : "n/a"}</b></div>
   `;
 }
 
-async function fitCurrent() {
+async function fitCurrent(fitType = selectedFitType) {
   if (!img || fitBtn.disabled) return;
   const label = runLabel.value || `Run ${runs.length + 1}`;
   const payload = {
     imageName,
     label,
+    fitType,
     baseline: baseline.map((p) => [p.x, p.y]),
     points: trace.map((p) => [p.x, p.y]),
   };
-  fitBtn.disabled = true;
+  setFitControlsDisabled(true);
   try {
     const response = await fetch("/api/fit", {
       method: "POST",
@@ -1065,11 +1236,32 @@ async function fitCurrent() {
     fitSummary.classList.add("muted");
     fitSummary.textContent = error.message;
   } finally {
-    fitBtn.disabled = false;
+    setFitControlsDisabled(false);
   }
 }
 
-fitBtn.addEventListener("click", fitCurrent);
+fitBtn.addEventListener("click", () => fitCurrent());
+
+fitMenuBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const open = !fitMenu.classList.contains("open");
+  fitMenu.classList.toggle("open", open);
+  fitMenuBtn.setAttribute("aria-expanded", String(open));
+});
+
+fitMenu.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-fit-type]");
+  if (!button) return;
+  setFitType(button.dataset.fitType);
+  closeFitMenu();
+  fitBtn.focus();
+});
+
+document.addEventListener("click", (event) => {
+  if (!fitMenu.classList.contains("open")) return;
+  if (event.target.closest(".split-fit")) return;
+  closeFitMenu();
+});
 
 function updateRunControls() {
   const disabled = allRuns().length === 0;
@@ -1100,7 +1292,7 @@ function renderRuns() {
   runsBody.innerHTML = runs.map((run, index) => `
     <tr data-run-row="${index}" class="${hoveredRunIndex === index ? "run-hover" : ""}">
       <td><input class="run-label-input" data-edit-run-label="${index}" value="${escapeHtml(run.label || `Run ${index + 1}`)}" aria-label="Run label"></td>
-      <td>${run.fit}</td>
+      <td>${formatFitName(run.fit)}</td>
       <td>${format(run.theta_mean)}</td>
       <td>${format(run.circle?.theta_mean)}</td>
       <td>${format(run.theta_left)}</td>
@@ -1222,12 +1414,23 @@ function exportRuns() {
     "ellipse_b",
     "ellipse_eccentricity",
     "ellipse_residual_stdev",
+    "young_laplace_theta_mean_deg",
+    "young_laplace_theta_left_deg",
+    "young_laplace_theta_right_deg",
+    "young_laplace_contact_width_px",
+    "young_laplace_bond",
+    "young_laplace_scale_px",
+    "young_laplace_residual_rms",
     "saved_at",
   ];
   const rows = exportRows.map((run) => {
     const ellipse = run.ellipse || {};
     const ellipseWidth = ellipse.contact_right !== undefined && ellipse.contact_left !== undefined
       ? ellipse.contact_right - ellipse.contact_left
+      : null;
+    const youngLaplace = run.young_laplace || {};
+    const youngLaplaceWidth = youngLaplace.contact_right !== undefined && youngLaplace.contact_left !== undefined
+      ? youngLaplace.contact_right - youngLaplace.contact_left
       : null;
     return [
       run.image_name,
@@ -1255,6 +1458,13 @@ function exportRuns() {
       ellipse.b,
       ellipse.eccentricity,
       ellipse.residual_stdev,
+      youngLaplace.theta_mean,
+      youngLaplace.theta_left,
+      youngLaplace.theta_right,
+      youngLaplaceWidth,
+      youngLaplace.bond,
+      youngLaplace.scale_px,
+      youngLaplace.residual_rms,
       run.saved_at,
     ];
   });
@@ -1295,6 +1505,12 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.ctrlKey && !event.shiftKey && !event.altKey && key === "p") {
+    event.preventDefault();
+    if (!event.repeat) toggleProtractorCursor();
+    return;
+  }
+
   if (inFormControl || event.ctrlKey || event.metaKey || event.altKey) return;
 
   if (key === "f") {
@@ -1317,6 +1533,7 @@ window.addEventListener("keydown", (event) => {
     resetViewport();
   } else if (event.key === "Escape") {
     event.preventDefault();
+    closeFitMenu();
     heldMode = null;
     heldModeReturn = null;
     setMode("trace");
