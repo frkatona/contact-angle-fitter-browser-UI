@@ -34,6 +34,15 @@ def _angle_delta(a: float, b: float) -> float:
     return math.degrees(min(diff, math.pi - diff))
 
 
+def _contact_angle_from_slope(slope: float, side: str) -> float:
+    if not math.isfinite(slope):
+        return 90.0
+    acute = math.degrees(math.atan(abs(slope)))
+    if side == "left":
+        return acute if slope >= 0 else 180.0 - acute
+    return acute if slope <= 0 else 180.0 - acute
+
+
 def _baseline_frame(points: np.ndarray, baseline: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     p0, p1 = baseline
     axis = p1 - p0
@@ -72,9 +81,9 @@ def _fit_circle(points: np.ndarray) -> dict[str, Any]:
     span = math.sqrt(root)
     contacts = sorted([cx - span, cx + span])
     angles = []
-    for contact_x in contacts:
+    for side, contact_x in zip(("left", "right"), contacts):
         slope = -(contact_x - cx) / (0 - cy)
-        angles.append(math.degrees(math.atan(abs(slope))))
+        angles.append(_contact_angle_from_slope(float(slope), side))
 
     return {
         "kind": "circle",
@@ -159,7 +168,7 @@ def _fit_ellipse(points: np.ndarray, circle: dict[str, Any]) -> dict[str, Any] |
         return None
     contacts = [contacts[0], contacts[-1]]
     slopes = [_ellipse_slope(params, contact) for contact in contacts]
-    angles = [math.degrees(math.atan(abs(slope))) if math.isfinite(slope) else 90.0 for slope in slopes]
+    angles = [_contact_angle_from_slope(float(slope), side) for side, slope in zip(("left", "right"), slopes)]
     cx, cy, log_a, log_b, phi = params
     a = math.exp(log_a)
     b = math.exp(log_b)

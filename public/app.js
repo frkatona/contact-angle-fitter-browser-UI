@@ -5,7 +5,6 @@ const imageNameDisplay = document.querySelector("#imageNameDisplay");
 const emptyState = document.querySelector("#emptyState");
 const fitBtn = document.querySelector("#fitBtn");
 const saveBtn = document.querySelector("#saveBtn");
-const newTraceBtn = document.querySelector("#newTraceBtn");
 const undoBtn = document.querySelector("#undoBtn");
 const clearFitsBtn = document.querySelector("#clearFitsBtn");
 const clearBtn = document.querySelector("#clearBtn");
@@ -519,14 +518,22 @@ zoomInBtn.addEventListener("click", () => zoomAt(1.25));
 zoomResetBtn.addEventListener("click", () => resetViewport());
 
 function addTracePoint(point) {
+  if (currentFit) {
+    archiveCurrentFitForComparison();
+    trace = [];
+    undoStack = [];
+    redoStack = [];
+    lastPoint = null;
+    resetFitSummary();
+    invalidateCurrentFit();
+  }
+
   const minSpacing = Number(spacing.value);
   if (!lastPoint || Math.hypot(point.x - lastPoint.x, point.y - lastPoint.y) >= minSpacing) {
-    archiveCurrentFitForComparison();
     const nextPoint = clonePoint(point);
     trace.push(nextPoint);
     lastPoint = point;
     pushHistory({ type: "trace:add", point: nextPoint });
-    invalidateCurrentFit();
     syncActiveRecord();
     draw();
   }
@@ -667,6 +674,12 @@ function tangentSlope(fit, contactX) {
   return -(contactX - fit.cx) / (0 - fit.cy);
 }
 
+function tangentAngleThroughDrop(slope) {
+  if (!Number.isFinite(slope)) return Math.PI / 2;
+  if (slope >= 0) return Math.atan(slope);
+  return Math.PI + Math.atan(slope);
+}
+
 function drawTangentAt(fit, contactX, frame) {
   const slope = tangentSlope(fit, contactX);
   const span = Math.max(1, Math.abs(fit.contact_right - fit.contact_left));
@@ -682,6 +695,28 @@ function drawTangentAt(fit, contactX, frame) {
   const p2 = localToScreen(contactX + dx, dy, frame);
   ctx.moveTo(p1.x, p1.y);
   ctx.lineTo(p2.x, p2.y);
+}
+
+function drawContactAngleArc(fit, contactX, side, frame, style = {}) {
+  const slope = tangentSlope(fit, contactX);
+  const tangentAngle = tangentAngleThroughDrop(slope);
+  const span = Math.max(1, Math.abs(fit.contact_right - fit.contact_left));
+  const radius = Math.max(14 / view.scale, Math.min(42, span * 0.12));
+  const start = side === "left" ? 0 : tangentAngle;
+  const end = side === "left" ? tangentAngle : Math.PI;
+  const steps = Math.max(12, Math.ceil(Math.abs(end - start) / 0.08));
+
+  ctx.strokeStyle = style.arcColor || "rgba(255, 219, 92, 0.98)";
+  ctx.lineWidth = style.arcWidth || 2;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  for (let i = 0; i <= steps; i += 1) {
+    const a = start + ((end - start) * i) / steps;
+    const p = localToScreen(contactX + radius * Math.cos(a), radius * Math.sin(a), frame);
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  }
+  ctx.stroke();
 }
 
 function drawFitOverlayFor(fitResult, sourceBaseline, sourceTrace, style = {}) {
@@ -719,6 +754,15 @@ function drawFitOverlayFor(fitResult, sourceBaseline, sourceTrace, style = {}) {
   }
   ctx.stroke();
 
+  const left = localToScreen(fit.contact_left, 0, frame);
+  const right = localToScreen(fit.contact_right, 0, frame);
+  ctx.fillStyle = pointColor;
+  [left, right].forEach((p) => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
   ctx.strokeStyle = tangentColor;
   ctx.lineWidth = style.tangentWidth || 2.2;
   ctx.setLineDash(style.tangentDash || [8, 5]);
@@ -728,14 +772,8 @@ function drawFitOverlayFor(fitResult, sourceBaseline, sourceTrace, style = {}) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  const left = localToScreen(fit.contact_left, 0, frame);
-  const right = localToScreen(fit.contact_right, 0, frame);
-  ctx.fillStyle = pointColor;
-  [left, right].forEach((p) => {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-    ctx.fill();
-  });
+  drawContactAngleArc(fit, fit.contact_left, "left", frame, style);
+  drawContactAngleArc(fit, fit.contact_right, "right", frame, style);
 }
 
 function drawFitOverlay() {
@@ -752,6 +790,7 @@ function drawPreviousFits() {
       curveColor: "rgba(180, 187, 174, 0.58)",
       tangentColor: "rgba(202, 176, 108, 0.58)",
       pointColor: "rgba(178, 166, 142, 0.66)",
+      arcColor: "rgba(206, 196, 153, 0.45)",
       width: 1.6,
       tangentWidth: 1.6,
       tangentDash: [6, 6],
@@ -961,20 +1000,6 @@ runsBody.addEventListener("click", (event) => {
   syncActiveRecord();
 });
 
-function startNewTrace() {
-  archiveCurrentFitForComparison();
-  trace = [];
-  undoStack = [];
-  redoStack = [];
-  invalidateCurrentFit();
-  fitSummary.classList.add("muted");
-  fitSummary.textContent = "No fit yet.";
-  syncActiveRecord();
-  draw();
-}
-
-newTraceBtn.addEventListener("click", startNewTrace);
-
 undoBtn.addEventListener("click", undoPoint);
 
 function clearPreviousFits() {
@@ -1089,9 +1114,6 @@ window.addEventListener("keydown", (event) => {
   } else if (key === "f") {
     event.preventDefault();
     fitCurrent();
-  } else if (key === "n") {
-    event.preventDefault();
-    startNewTrace();
   } else if (key === "t") {
     event.preventDefault();
     toggleThresholdView();
