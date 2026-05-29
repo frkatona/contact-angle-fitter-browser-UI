@@ -34,10 +34,9 @@ docker compose up --build
 3. Choose **Trace** and drag or click along the visible droplet boundary.
 4. Use the mouse wheel or zoom controls for small droplets. Right mouse drag to pan without editing traces.
 5. Optionally press **T** to toggle a binary threshold view and adjust the threshold value in the workbench panel.
-6. Press **Fit** to compute circle and ellipse fits and draw the contact tangents.
-7. Press **Save Run** to add the measurement to the output table.
-8. Repeat traces on the same image, or switch between loaded images in the output panel.
-9. Delete rows or remove images as needed, then export CSV.
+6. Press **Fit** to compute circle and ellipse fits, draw the contact tangents, and add the measurement to the output table.
+7. Repeat traces on the same image, or switch between loaded images in the output panel.
+8. Rename or delete rows, remove images as needed, then export CSV.
 
 Measurements are kept in the browser for the current session until an image is removed or the page is refreshed.
 

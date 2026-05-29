@@ -5,9 +5,7 @@ const imageInput = document.querySelector("#imageInput");
 const imageNameDisplay = document.querySelector("#imageNameDisplay");
 const emptyState = document.querySelector("#emptyState");
 const fitBtn = document.querySelector("#fitBtn");
-const saveBtn = document.querySelector("#saveBtn");
 const undoBtn = document.querySelector("#undoBtn");
-const clearFitsBtn = document.querySelector("#clearFitsBtn");
 const clearBtn = document.querySelector("#clearBtn");
 const exportBtn = document.querySelector("#exportBtn");
 const exportTableBtn = document.querySelector("#exportTableBtn");
@@ -37,8 +35,6 @@ let trace = [];
 let baseline = [];
 let runs = [];
 let currentFit = null;
-let pendingFit = false;
-let previousFits = [];
 let selectedMode = "trace";
 let undoStack = [];
 let redoStack = [];
@@ -53,6 +49,7 @@ let viewport = { zoom: 1, panX: 0, panY: 0 };
 let heldMode = null;
 let heldModeReturn = null;
 let panelResize = null;
+let hoveredRunIndex = null;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -107,8 +104,6 @@ function syncActiveRecord() {
   record.baseline = baseline;
   record.runs = runs;
   record.currentFit = currentFit;
-  record.pendingFit = pendingFit;
-  record.previousFits = previousFits;
   record.selectedMode = selectedMode;
   record.undoStack = undoStack;
   record.redoStack = redoStack;
@@ -120,10 +115,6 @@ function syncActiveRecord() {
 
 function allRuns() {
   return images.flatMap((record) => record.runs.map((run) => ({ ...run, image_name: record.name })));
-}
-
-function updateComparisonControls() {
-  clearFitsBtn.disabled = previousFits.length === 0;
 }
 
 function isImageFile(file) {
@@ -142,22 +133,8 @@ function cloneFit(fit) {
   return fit ? JSON.parse(JSON.stringify(fit)) : null;
 }
 
-function archiveCurrentFitForComparison() {
-  if (!currentFit || baseline.length !== 2) return;
-  previousFits.push({
-    fit: cloneFit(currentFit),
-    trace: clonePoints(trace),
-    baseline: clonePoints(baseline),
-    label: runLabel.value || currentFit.label || `Fit ${previousFits.length + 1}`,
-  });
-  if (previousFits.length > 24) previousFits.shift();
-  updateComparisonControls();
-}
-
 function invalidateCurrentFit() {
   currentFit = null;
-  pendingFit = false;
-  saveBtn.disabled = true;
 }
 
 function pushHistory(action) {
@@ -168,7 +145,6 @@ function pushHistory(action) {
 
 function applyHistory(action, direction) {
   const redo = direction === "redo";
-  archiveCurrentFitForComparison();
   if (action.type === "trace:add") {
     if (redo) trace.push(clonePoint(action.point));
     else trace.pop();
@@ -269,7 +245,6 @@ resizeCanvas();
 updateZoomLabel();
 updateRunControls();
 renderImageList();
-updateComparisonControls();
 updateSpacingBubble();
 
 function resetFitSummary() {
@@ -285,8 +260,6 @@ function clearActiveImage() {
   baseline = [];
   runs = [];
   currentFit = null;
-  pendingFit = false;
-  previousFits = [];
   selectedMode = "trace";
   undoStack = [];
   redoStack = [];
@@ -294,6 +267,7 @@ function clearActiveImage() {
   thresholdValue = 128;
   viewport = { zoom: 1, panX: 0, panY: 0 };
   runLabel.value = "Run 1";
+  hoveredRunIndex = null;
   thresholdInput.value = thresholdValue;
   thresholdControl.classList.remove("active");
   imageNameDisplay.textContent = "No image loaded";
@@ -301,8 +275,6 @@ function clearActiveImage() {
   emptyState.style.display = "";
   setMode("trace");
   resetFitSummary();
-  saveBtn.disabled = true;
-  updateComparisonControls();
   updateZoomLabel();
   renderRuns();
   renderImageList();
@@ -317,14 +289,13 @@ function switchToImage(imageId) {
     return;
   }
   activeImageId = record.id;
+  hoveredRunIndex = null;
   img = record.img;
   imageName = record.name;
   trace = record.trace;
   baseline = record.baseline;
   runs = record.runs;
   currentFit = record.currentFit;
-  pendingFit = Boolean(record.pendingFit);
-  previousFits = record.previousFits || [];
   selectedMode = record.selectedMode || "trace";
   undoStack = record.undoStack || [];
   redoStack = record.redoStack || [];
@@ -341,8 +312,6 @@ function switchToImage(imageId) {
   updateZoomLabel();
   if (currentFit) renderFit(currentFit);
   else resetFitSummary();
-  saveBtn.disabled = !pendingFit;
-  updateComparisonControls();
   renderRuns();
   renderImageList();
   draw();
@@ -387,8 +356,6 @@ async function loadImageFile(file) {
     baseline: [],
     runs: [],
     currentFit: null,
-    pendingFit: false,
-    previousFits: [],
     selectedMode: "trace",
     undoStack: [],
     redoStack: [],
@@ -581,11 +548,12 @@ zoomResetBtn.addEventListener("click", () => resetViewport());
 
 function addTracePoint(point) {
   if (currentFit) {
-    archiveCurrentFitForComparison();
     trace = [];
     undoStack = [];
     redoStack = [];
     lastPoint = null;
+    hoveredRunIndex = null;
+    updateRunRowHover();
     resetFitSummary();
     invalidateCurrentFit();
   }
@@ -632,7 +600,6 @@ canvas.addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
   const point = screenToImage(event);
   if (mode === "baseline") {
-    archiveCurrentFitForComparison();
     const previous = clonePoints(baseline);
     if (baseline.length >= 2) baseline = [];
     baseline.push(clonePoint(point));
@@ -656,12 +623,19 @@ canvas.addEventListener("pointermove", (event) => {
     draw();
     return;
   }
-  if (!isDrawing || mode !== "trace") return;
+  if (!isDrawing) {
+    setHoveredRunIndex(runOverlayAt(eventToCanvasPoint(event)));
+    return;
+  }
+  if (mode !== "trace") return;
   addTracePoint(screenToImage(event));
 });
 
 canvas.addEventListener("pointerup", stopPointerWork);
 canvas.addEventListener("pointercancel", stopPointerWork);
+canvas.addEventListener("pointerleave", () => {
+  if (!isDrawing && !isPanning) setHoveredRunIndex(null);
+});
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
 function drawPolyline(points, color, width = 2) {
@@ -742,7 +716,11 @@ function tangentAngleThroughDrop(slope) {
   return Math.PI + Math.atan(slope);
 }
 
-function drawTangentAt(fit, contactX, frame) {
+function selectedFitDetails(run) {
+  return run.fit === "ellipse" && run.ellipse ? run.ellipse : run.circle;
+}
+
+function tangentSegmentAt(fit, contactX, frame) {
   const slope = tangentSlope(fit, contactX);
   const span = Math.max(1, Math.abs(fit.contact_right - fit.contact_left));
   const halfLength = Math.max(16 / view.scale, Math.min(90, span * 0.24));
@@ -755,6 +733,11 @@ function drawTangentAt(fit, contactX, frame) {
   }
   const p1 = localToScreen(contactX - dx, -dy, frame);
   const p2 = localToScreen(contactX + dx, dy, frame);
+  return [p1, p2];
+}
+
+function drawTangentAt(fit, contactX, frame) {
+  const [p1, p2] = tangentSegmentAt(fit, contactX, frame);
   ctx.moveTo(p1.x, p1.y);
   ctx.lineTo(p2.x, p2.y);
 }
@@ -785,7 +768,8 @@ function drawFitOverlayFor(fitResult, sourceBaseline, sourceTrace, style = {}) {
   if (!fitResult || sourceBaseline.length !== 2) return;
   const frame = makeLocalFrame(sourceBaseline, sourceTrace);
   if (!frame) return;
-  const fit = fitResult.fit === "ellipse" && fitResult.ellipse ? fitResult.ellipse : fitResult.circle;
+  const fit = selectedFitDetails(fitResult);
+  if (!fit) return;
   const curveColor = style.curveColor || "rgba(31, 122, 101, 0.95)";
   const tangentColor = style.tangentColor || "rgba(255, 112, 67, 0.98)";
   const pointColor = style.pointColor || "#b24f34";
@@ -838,26 +822,121 @@ function drawFitOverlayFor(fitResult, sourceBaseline, sourceTrace, style = {}) {
   drawContactAngleArc(fit, fit.contact_right, "right", frame, style);
 }
 
-function drawFitOverlay() {
-  drawFitOverlayFor(currentFit, baseline, trace);
+function runOverlayPoints(points) {
+  return (points || []).map((point) => (
+    Array.isArray(point) ? { x: point[0], y: point[1] } : clonePoint(point)
+  ));
 }
 
-function drawPreviousFits() {
-  previousFits.forEach((snapshot) => {
-    drawPolyline(snapshot.trace, "rgba(194, 196, 188, 0.5)", 2);
-    drawPoints(snapshot.trace.filter((_, i) => i % 10 === 0), "rgba(210, 211, 204, 0.42)", 2);
-    drawPolyline(snapshot.baseline, "rgba(160, 172, 178, 0.58)", 2.2);
-    drawPoints(snapshot.baseline, "rgba(190, 198, 202, 0.62)", 4);
-    drawFitOverlayFor(snapshot.fit, snapshot.baseline, snapshot.trace, {
-      curveColor: "rgba(180, 187, 174, 0.58)",
-      tangentColor: "rgba(202, 176, 108, 0.58)",
-      pointColor: "rgba(178, 166, 142, 0.66)",
-      arcColor: "rgba(206, 196, 153, 0.45)",
-      width: 1.6,
-      tangentWidth: 1.6,
-      tangentDash: [6, 6],
+function runOverlayBaseline(run) {
+  return runOverlayPoints(run.overlayBaseline || run.baseline);
+}
+
+function runOverlayTrace(run) {
+  return runOverlayPoints(run.overlayTrace);
+}
+
+function drawSavedRunOverlays() {
+  runs.forEach((run, index) => {
+    const sourceBaseline = runOverlayBaseline(run);
+    const sourceTrace = runOverlayTrace(run);
+    if (sourceBaseline.length !== 2 || sourceTrace.length < 2) return;
+    const highlighted = hoveredRunIndex === index;
+    drawPolyline(sourceTrace, highlighted ? "rgba(241, 200, 75, 0.82)" : "rgba(194, 196, 188, 0.42)", highlighted ? 2.8 : 1.8);
+    drawPoints(sourceTrace.filter((_, i) => i % 10 === 0), highlighted ? "rgba(255, 241, 166, 0.78)" : "rgba(210, 211, 204, 0.36)", highlighted ? 2.8 : 2);
+    drawPolyline(sourceBaseline, highlighted ? "rgba(37, 128, 195, 0.82)" : "rgba(160, 172, 178, 0.52)", highlighted ? 3 : 2);
+    drawPoints(sourceBaseline, highlighted ? "rgba(216, 239, 255, 0.86)" : "rgba(190, 198, 202, 0.58)", highlighted ? 5 : 4);
+    drawFitOverlayFor(run, sourceBaseline, sourceTrace, {
+      curveColor: highlighted ? "rgba(31, 122, 101, 0.98)" : "rgba(180, 187, 174, 0.56)",
+      tangentColor: highlighted ? "rgba(255, 112, 67, 0.98)" : "rgba(202, 176, 108, 0.54)",
+      pointColor: highlighted ? "#b24f34" : "rgba(178, 166, 142, 0.64)",
+      arcColor: highlighted ? "rgba(255, 219, 92, 0.98)" : "rgba(206, 196, 153, 0.43)",
+      width: highlighted ? 2.4 : 1.5,
+      tangentWidth: highlighted ? 2.4 : 1.5,
+      tangentDash: highlighted ? [8, 5] : [6, 6],
     });
   });
+}
+
+function fitCurveScreenPoints(fit, frame) {
+  const points = [];
+  if (!fit) return points;
+  if (fit.kind === "circle") {
+    for (let i = 0; i <= 96; i += 1) {
+      const t = (Math.PI * 2 * i) / 96;
+      points.push(localToScreen(fit.cx + fit.radius * Math.cos(t), fit.cy + fit.radius * Math.sin(t), frame));
+    }
+  } else {
+    for (let i = 0; i <= 112; i += 1) {
+      const t = (Math.PI * 2 * i) / 112;
+      const xp = fit.a * Math.cos(t);
+      const yp = fit.b * Math.sin(t);
+      points.push(localToScreen(
+        fit.cx + xp * Math.cos(fit.phi) - yp * Math.sin(fit.phi),
+        fit.cy + xp * Math.sin(fit.phi) + yp * Math.cos(fit.phi),
+        frame,
+      ));
+    }
+  }
+  return points;
+}
+
+function distanceToSegment(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq <= 1e-9) return Math.hypot(point.x - a.x, point.y - a.y);
+  const t = clamp(((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq, 0, 1);
+  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+}
+
+function distanceToPolyline(point, points) {
+  if (points.length < 2) return Infinity;
+  let best = Infinity;
+  for (let i = 1; i < points.length; i += 1) {
+    best = Math.min(best, distanceToSegment(point, points[i - 1], points[i]));
+  }
+  return best;
+}
+
+function runOverlayAt(screenPoint) {
+  computeView();
+  for (let index = runs.length - 1; index >= 0; index -= 1) {
+    const run = runs[index];
+    const sourceBaseline = runOverlayBaseline(run);
+    const sourceTrace = runOverlayTrace(run);
+    if (sourceBaseline.length !== 2 || sourceTrace.length < 2) continue;
+    const frame = makeLocalFrame(sourceBaseline, sourceTrace);
+    const fit = selectedFitDetails(run);
+    if (!frame || !fit) continue;
+    const traceScreen = sourceTrace.map(imageToScreen);
+    const baselineScreen = sourceBaseline.map(imageToScreen);
+    const curveScreen = fitCurveScreenPoints(fit, frame);
+    const leftTangent = tangentSegmentAt(fit, fit.contact_left, frame);
+    const rightTangent = tangentSegmentAt(fit, fit.contact_right, frame);
+    const distance = Math.min(
+      distanceToPolyline(screenPoint, curveScreen),
+      distanceToPolyline(screenPoint, traceScreen),
+      distanceToPolyline(screenPoint, baselineScreen),
+      distanceToSegment(screenPoint, leftTangent[0], leftTangent[1]),
+      distanceToSegment(screenPoint, rightTangent[0], rightTangent[1]),
+    );
+    if (distance <= 9) return index;
+  }
+  return null;
+}
+
+function updateRunRowHover() {
+  runsBody.querySelectorAll("[data-run-row]").forEach((row) => {
+    row.classList.toggle("run-hover", Number(row.dataset.runRow) === hoveredRunIndex);
+  });
+}
+
+function setHoveredRunIndex(index) {
+  if (hoveredRunIndex === index) return;
+  hoveredRunIndex = index;
+  updateRunRowHover();
+  draw();
 }
 
 function thresholdCanvasForActiveImage() {
@@ -893,12 +972,13 @@ function draw() {
   ctx.drawImage(thresholdEnabled ? thresholdCanvasForActiveImage() : img, view.ox, view.oy, view.width, view.height);
   ctx.fillStyle = "rgba(0, 0, 0, 0.24)";
   ctx.fillRect(view.ox, view.oy, view.width, view.height);
-  drawPreviousFits();
-  drawPolyline(trace, "#f1c84b", 2.5);
-  drawPoints(trace.filter((_, i) => i % 8 === 0), "#fff1a6", 2.5);
-  drawPolyline(baseline, "#2580c3", 3);
-  drawPoints(baseline, "#d8efff", 5);
-  drawFitOverlay();
+  drawSavedRunOverlays();
+  if (!currentFit) {
+    drawPolyline(trace, "#f1c84b", 2.5);
+    drawPoints(trace.filter((_, i) => i % 8 === 0), "#fff1a6", 2.5);
+    drawPolyline(baseline, "#2580c3", 3);
+    drawPoints(baseline, "#d8efff", 5);
+  }
 }
 
 function format(value, places = 2) {
@@ -916,10 +996,6 @@ function circleContactWidth(run) {
   return run.circle.contact_right - run.circle.contact_left;
 }
 
-function selectedFitDetails(run) {
-  return run.fit === "ellipse" && run.ellipse ? run.ellipse : run.circle;
-}
-
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -933,14 +1009,10 @@ function renderFit(result) {
   fitSummary.classList.remove("muted");
   const ellipse = result.ellipse;
   const circle = result.circle;
-  const selected = selectedFitDetails(result);
-  const selectedWidth = selected ? selected.contact_right - selected.contact_left : result.contact_width_px;
   const circleWidth = circle ? circle.contact_right - circle.contact_left : null;
+  const ellipseWidth = ellipse ? ellipse.contact_right - ellipse.contact_left : null;
   fitSummary.innerHTML = `
     <div class="metric"><span>Selected model</span><b>${result.fit}</b></div>
-    <div class="metric"><span>Mean angle</span><b>${format(result.theta_mean)}&deg;</b></div>
-    <div class="metric"><span>Left / right</span><b>${format(result.theta_left)}&deg; / ${format(result.theta_right)}&deg;</b></div>
-    <div class="metric"><span>Selected width</span><b>${format(selectedWidth)} px</b></div>
     <div class="fit-subhead">Circle fit</div>
     <div class="metric"><span>Mean angle</span><b>${format(circle.theta_mean)}&deg;</b></div>
     <div class="metric"><span>Left / right</span><b>${format(circle.theta_left)}&deg; / ${format(circle.theta_right)}&deg;</b></div>
@@ -949,6 +1021,7 @@ function renderFit(result) {
     <div class="fit-subhead">Ellipse fit</div>
     <div class="metric"><span>Mean angle</span><b>${ellipse ? `${format(ellipse.theta_mean)}&deg;` : "n/a"}</b></div>
     <div class="metric"><span>Left / right</span><b>${ellipse ? `${format(ellipse.theta_left)}&deg; / ${format(ellipse.theta_right)}&deg;` : "n/a"}</b></div>
+    <div class="metric"><span>Width</span><b>${ellipse ? `${format(ellipseWidth)} px` : "n/a"}</b></div>
     <div class="metric"><span>a / b / e</span><b>${ellipse ? `${format(ellipse.a)} / ${format(ellipse.b)} / ${format(ellipse.eccentricity, 3)}` : "n/a"}</b></div>
     <div class="metric"><span>Ellipse residual</span><b>${ellipse ? format(ellipse.residual_stdev, 3) : "n/a"}</b></div>
   `;
@@ -956,9 +1029,10 @@ function renderFit(result) {
 
 async function fitCurrent() {
   if (!img || fitBtn.disabled) return;
+  const label = runLabel.value || `Run ${runs.length + 1}`;
   const payload = {
     imageName,
-    label: runLabel.value || `Run ${runs.length + 1}`,
+    label,
     baseline: baseline.map((p) => [p.x, p.y]),
     points: trace.map((p) => [p.x, p.y]),
   };
@@ -971,10 +1045,20 @@ async function fitCurrent() {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Fit failed.");
-    currentFit = result;
-    pendingFit = true;
-    renderFit(result);
-    saveBtn.disabled = false;
+    const savedRun = {
+      ...result,
+      label,
+      overlayTrace: clonePoints(trace),
+      overlayBaseline: clonePoints(baseline),
+      saved_at: new Date().toISOString(),
+    };
+    runs.push(savedRun);
+    currentFit = savedRun;
+    hoveredRunIndex = runs.length - 1;
+    renderFit(savedRun);
+    renderRuns();
+    renderImageList();
+    runLabel.value = `Run ${runs.length + 1}`;
     syncActiveRecord();
     draw();
   } catch (error) {
@@ -986,24 +1070,6 @@ async function fitCurrent() {
 }
 
 fitBtn.addEventListener("click", fitCurrent);
-
-function saveCurrentRun() {
-  if (!currentFit || saveBtn.disabled) return;
-  runs.push({
-    ...currentFit,
-    label: runLabel.value || currentFit.label,
-    saved_at: new Date().toISOString(),
-  });
-  pendingFit = false;
-  syncActiveRecord();
-  renderRuns();
-  renderImageList();
-  runLabel.value = `Run ${runs.length + 1}`;
-  saveBtn.disabled = true;
-  syncActiveRecord();
-}
-
-saveBtn.addEventListener("click", saveCurrentRun);
 
 function updateRunControls() {
   const disabled = allRuns().length === 0;
@@ -1032,7 +1098,7 @@ function renderRuns() {
   activeResultsLabel.textContent = active ? `Showing rows for ${active.name}` : "No active image";
   activeResultsLabel.title = active?.name || "";
   runsBody.innerHTML = runs.map((run, index) => `
-    <tr>
+    <tr data-run-row="${index}" class="${hoveredRunIndex === index ? "run-hover" : ""}">
       <td><input class="run-label-input" data-edit-run-label="${index}" value="${escapeHtml(run.label || `Run ${index + 1}`)}" aria-label="Run label"></td>
       <td>${run.fit}</td>
       <td>${format(run.theta_mean)}</td>
@@ -1045,6 +1111,7 @@ function renderRuns() {
       <td><button class="delete-run" data-delete-run="${index}" title="Delete row" aria-label="Delete row">x</button></td>
     </tr>
   `).join("");
+  updateRunRowHover();
   updateRunControls();
 }
 
@@ -1075,12 +1142,21 @@ imageList.addEventListener("click", (event) => {
 runsBody.addEventListener("click", (event) => {
   const button = event.target.closest("[data-delete-run]");
   if (!button) return;
-  runs.splice(Number(button.dataset.deleteRun), 1);
+  const deletedIndex = Number(button.dataset.deleteRun);
+  const deletedRun = runs[deletedIndex];
+  runs.splice(deletedIndex, 1);
+  if (hoveredRunIndex === deletedIndex) hoveredRunIndex = null;
+  else if (hoveredRunIndex !== null && hoveredRunIndex > deletedIndex) hoveredRunIndex -= 1;
+  if (deletedRun === currentFit) {
+    currentFit = null;
+    resetFitSummary();
+  }
   syncActiveRecord();
   renderRuns();
   renderImageList();
   runLabel.value = `Run ${runs.length + 1}`;
   syncActiveRecord();
+  draw();
 });
 
 runsBody.addEventListener("input", (event) => {
@@ -1092,19 +1168,19 @@ runsBody.addEventListener("input", (event) => {
   syncActiveRecord();
 });
 
+runsBody.addEventListener("pointerover", (event) => {
+  const row = event.target.closest("[data-run-row]");
+  if (!row) return;
+  setHoveredRunIndex(Number(row.dataset.runRow));
+});
+
+runsBody.addEventListener("pointerleave", () => {
+  setHoveredRunIndex(null);
+});
+
 undoBtn.addEventListener("click", undoPoint);
 
-function clearPreviousFits() {
-  previousFits = [];
-  updateComparisonControls();
-  syncActiveRecord();
-  draw();
-}
-
-clearFitsBtn.addEventListener("click", clearPreviousFits);
-
 function clearDrawing() {
-  archiveCurrentFitForComparison();
   trace = [];
   baseline = [];
   undoStack = [];
@@ -1221,10 +1297,7 @@ window.addEventListener("keydown", (event) => {
 
   if (inFormControl || event.ctrlKey || event.metaKey || event.altKey) return;
 
-  if (event.key === "Enter") {
-    event.preventDefault();
-    saveCurrentRun();
-  } else if (key === "f") {
+  if (key === "f") {
     event.preventDefault();
     fitCurrent();
   } else if (key === "t") {
