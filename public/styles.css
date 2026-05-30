@@ -95,6 +95,28 @@ h1 {
   margin: 0;
 }
 
+.rail-title {
+  display: grid;
+  gap: 0;
+}
+
+.title-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.rail-section-divider {
+  border-top: 2px solid color-mix(in srgb, var(--line) 74%, var(--ink));
+  padding-top: 16px;
+}
+
+.rail-section-bottom-divider {
+  border-bottom: 2px solid color-mix(in srgb, var(--line) 74%, var(--ink));
+  padding-bottom: 16px;
+}
+
 .file-picker {
   align-items: center;
   background: var(--ink);
@@ -123,11 +145,22 @@ h1 {
 
 .segmented {
   background: #edf0eb;
-  border: 1px solid var(--line);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-left: 1px solid var(--line);
   border-radius: 7px;
+  border-right: 1px solid var(--line);
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   padding: 3px;
+  padding-top: 19px;
+}
+
+.segmented.rail-section-divider {
+  background:
+    linear-gradient(var(--bg), var(--bg)) top / 100% 16px no-repeat,
+    #edf0eb;
+  border-top: 2px solid color-mix(in srgb, var(--line) 74%, var(--ink));
 }
 
 .segmented button {
@@ -304,7 +337,7 @@ input:not([type]) {
 }
 
 .actions {
-  border-top: 1px solid var(--line);
+  border-top: 2px solid color-mix(in srgb, var(--line) 74%, var(--ink));
   display: grid;
   gap: 8px;
   padding-top: 14px;
@@ -333,9 +366,12 @@ input:not([type]) {
 
 .hotkey-help {
   align-self: flex-start;
-  margin-top: auto;
   outline: 0;
   position: relative;
+}
+
+.title-row .hotkey-help {
+  align-self: center;
 }
 
 .hotkey-trigger {
@@ -369,6 +405,13 @@ input:not([type]) {
   transition: opacity 120ms ease, transform 120ms ease;
   width: 184px;
   z-index: 3;
+}
+
+.title-row .hotkey-popover {
+  bottom: auto;
+  left: auto;
+  right: 0;
+  top: 32px;
 }
 
 .hotkey-help:hover .hotkey-popover,
@@ -442,6 +485,10 @@ canvas[data-mode="baseline"] {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='25' height='25' viewBox='0 0 25 25'%3E%3Cpath d='M12.5 1v23M1 12.5h23' stroke='%232580c3' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='12.5' cy='12.5' r='3.2' fill='none' stroke='%23d8efff' stroke-width='1.4'/%3E%3C/svg%3E") 12 12, crosshair;
 }
 
+canvas.has-run-hover {
+  cursor: pointer;
+}
+
 canvas.is-panning {
   cursor: grabbing;
 }
@@ -473,11 +520,84 @@ canvas.protractor-cursor {
   gap: 10px;
 }
 
+.fit-card {
+  --fit-color: var(--accent);
+  background: var(--surface);
+  background: color-mix(in srgb, var(--fit-color) 7%, var(--surface));
+  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--fit-color) 22%, var(--line));
+  border-left: 5px solid var(--fit-color);
+  border-radius: 7px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px 8px;
+}
+
+.fit-card-circle {
+  --fit-color: #1f7a65;
+}
+
+.fit-card-ellipse {
+  --fit-color: #2580c3;
+}
+
+.fit-card-young-laplace {
+  --fit-color: #b24f34;
+}
+
+.fit-card.selected {
+  box-shadow: 0 0 0 2px rgba(31, 122, 101, 0.22);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--fit-color) 42%, transparent);
+}
+
+.fit-card.unavailable {
+  cursor: default;
+  opacity: 0.56;
+}
+
+.fit-card:focus {
+  outline: 2px solid rgba(31, 122, 101, 0.32);
+  outline: 2px solid color-mix(in srgb, var(--fit-color) 56%, transparent);
+  outline-offset: 2px;
+}
+
+.fit-card-head {
+  align-items: center;
+  color: var(--ink);
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  justify-content: space-between;
+  padding-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.fit-card-head b {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.fit-card.selected .fit-card-head b {
+  color: var(--fit-color);
+}
+
 .metric {
   border-bottom: 1px solid var(--line);
   display: flex;
   justify-content: space-between;
   padding: 8px 0;
+}
+
+.fit-card .metric {
+  border-color: color-mix(in srgb, var(--fit-color) 18%, var(--line));
+  padding: 6px 0;
+}
+
+.fit-card .metric:last-child {
+  border-bottom: 0;
 }
 
 .metric b {
@@ -642,11 +762,20 @@ td:first-child {
 }
 
 .output-table tbody tr {
+  cursor: pointer;
   transition: background 120ms ease;
 }
 
 .output-table tbody tr.run-hover {
   background: #fff7d6;
+}
+
+.output-table tbody tr.run-selected {
+  background: #e7f3ee;
+}
+
+.output-table tbody tr.run-selected.run-hover {
+  background: #dcefe7;
 }
 
 th {
@@ -704,6 +833,7 @@ body.resizing-table-column {
   border: 1px solid transparent;
   border-radius: 5px;
   color: var(--ink);
+  cursor: text;
   max-width: none;
   min-height: 28px;
   min-width: 0;

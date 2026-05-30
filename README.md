@@ -176,35 +176,35 @@ $$
 
 The fitted parameters are the center \((c_x,c_y)\), semi-axes \(a\) and \(b\), and rotation \(\phi\). The optimizer is initialized from the circular fit and the principal components of the traced points. It then minimizes the algebraic residual
 
-\[
+$$
 \epsilon_i =
 \left(\frac{x_{r,i}}{a}\right)^2 +
 \left(\frac{y_{r,i}}{b}\right)^2 - 1
-\]
+$$
 
 using nonlinear least squares. The semi-axes are optimized in log space so they remain positive.
 
 Contact points are found by substituting \(y=0\) into the rotated ellipse equation and solving the resulting quadratic for \(x\). The tangent slope at a contact point is computed from the implicit curve \(F(x,y)=0\):
 
-\[
+$$
 m = \frac{dy}{dx} = -\frac{\partial F/\partial x}{\partial F/\partial y}.
-\]
+$$
 
 The same droplet-side angle convention used for the circular fit is then applied to obtain \(\theta_L\), \(\theta_R\), and \(\theta_C\). The reported eccentricity is
 
-\[
+$$
 e = \sqrt{1-\frac{\min(a,b)^2}{\max(a,b)^2}}.
-\]
+$$
 
 ### Young-Laplace Fit
 
 The Young-Laplace option fits a symmetric axisymmetric droplet profile in the same local frame. The implementation integrates the dimensionless meridian equations from the apex to the contact point:
 
-\[
+$$
 \frac{dr}{ds} = \cos\psi,\qquad
 \frac{dz}{ds} = \sin\psi,\qquad
 \frac{d\psi}{ds} = 2 + Bz - \frac{\sin\psi}{r}.
-\]
+$$
 
 The optimized parameters are the centerline position, pixel scale, contact angle parameter, and dimensionless Bond-like coefficient \(B\). The solver is initialized from the circular fit, samples the resulting profile from left contact to right contact, and minimizes geometric point-to-polyline distance with a soft robust loss. This makes the method most appropriate for clean full-edge traces of gravity-distorted drops.
 
@@ -214,10 +214,10 @@ Each fit request attempts all three models. The circular fit is always computed 
 
 For overlay compatibility, the backend still marks one conic fit as the internal display fit using a conservative residual heuristic:
 
-\[
+$$
 \text{select ellipse if }
 \sigma_{\mathrm{ellipse}} < 1.1\,\sigma_{\mathrm{circle}},
-\]
+$$
 
 otherwise select the circle. Here \(\sigma\) is the standard deviation of the model residuals returned by the backend. This rule favors the simpler circular model unless the ellipse is meaningfully better for the current trace, reducing the chance that small manual-tracing variations cause an unnecessarily complex fit to be selected.
 
@@ -236,3 +236,9 @@ docker run --rm -p 8000:8000 contact-angle-workbench:latest
 ```
 
 then open http://localhost:8000
+
+
+### notes to self
+
+- the circle fit and ellipse fit drawings seem to show the other one sometimes
+- allow selecting a row or frozen fit drawing to re-open the 'current fit' view and allow changing which fit is the overlay fit

@@ -702,6 +702,12 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
   if (event.button !== 0) return;
+  const overlayIndex = runOverlayAt(eventToCanvasPoint(event));
+  if (overlayIndex !== null) {
+    event.preventDefault();
+    selectRun(overlayIndex);
+    return;
+  }
   const point = screenToImage(event);
   if (mode === "baseline") {
     const previous = clonePoints(baseline);
@@ -828,9 +834,30 @@ function tangentAngleThroughDrop(slope) {
   return Math.PI + Math.atan(slope);
 }
 
+function fitForKind(run, kind) {
+  if (!run) return null;
+  if (kind === "young-laplace") return run.young_laplace || null;
+  if (kind === "ellipse") return run.ellipse || null;
+  if (kind === "circle") return run.circle || null;
+  return null;
+}
+
+function lowestResidualFitKind(run) {
+  const candidates = ["young-laplace", "ellipse", "circle"]
+    .map((kind) => ({ kind, residual: modelResidual(fitForKind(run, kind)) }))
+    .filter((candidate) => Number.isFinite(candidate.residual));
+  if (!candidates.length) return run?.circle ? "circle" : "young-laplace";
+  candidates.sort((a, b) => a.residual - b.residual);
+  return candidates[0].kind;
+}
+
+function selectedOverlayKind(run) {
+  if (fitForKind(run, run?.overlayFit)) return run.overlayFit;
+  return lowestResidualFitKind(run);
+}
+
 function selectedFitDetails(run) {
-  if (run.fit === "young-laplace" && run.young_laplace) return run.young_laplace;
-  return run.fit === "ellipse" && run.ellipse ? run.ellipse : run.circle;
+  return fitForKind(run, selectedOverlayKind(run));
 }
 
 function localSampleToScreen(sample, frame) {
@@ -964,7 +991,7 @@ function drawSavedRunOverlays() {
     const sourceBaseline = runOverlayBaseline(run);
     const sourceTrace = runOverlayTrace(run);
     if (sourceBaseline.length !== 2 || sourceTrace.length < 2) return;
-    const highlighted = hoveredRunIndex === index;
+    const highlighted = hoveredRunIndex === index || run === currentFit;
     drawPolyline(sourceTrace, highlighted ? "rgba(241, 200, 75, 0.82)" : "rgba(194, 196, 188, 0.42)", highlighted ? 2.8 : 1.8);
     drawPoints(sourceTrace.filter((_, i) => i % 10 === 0), highlighted ? "rgba(255, 241, 166, 0.78)" : "rgba(210, 211, 204, 0.36)", highlighted ? 2.8 : 2);
     drawPolyline(sourceBaseline, highlighted ? "rgba(37, 128, 195, 0.82)" : "rgba(160, 172, 178, 0.52)", highlighted ? 3 : 2);
@@ -1053,14 +1080,28 @@ function runOverlayAt(screenPoint) {
 
 function updateRunRowHover() {
   runsBody.querySelectorAll("[data-run-row]").forEach((row) => {
-    row.classList.toggle("run-hover", Number(row.dataset.runRow) === hoveredRunIndex);
+    const index = Number(row.dataset.runRow);
+    row.classList.toggle("run-hover", index === hoveredRunIndex);
+    row.classList.toggle("run-selected", runs[index] === currentFit);
   });
+  canvas.classList.toggle("has-run-hover", hoveredRunIndex !== null);
 }
 
 function setHoveredRunIndex(index) {
   if (hoveredRunIndex === index) return;
   hoveredRunIndex = index;
   updateRunRowHover();
+  draw();
+}
+
+function selectRun(index) {
+  const run = runs[index];
+  if (!run) return;
+  currentFit = run;
+  hoveredRunIndex = index;
+  renderFit(currentFit);
+  updateRunRowHover();
+  syncActiveRecord();
   draw();
 }
 
@@ -1246,24 +1287,31 @@ function renderFit(result) {
   const circleWidth = circle ? circle.contact_right - circle.contact_left : null;
   const ellipseWidth = ellipse ? ellipse.contact_right - ellipse.contact_left : null;
   const youngLaplaceWidth = youngLaplace ? youngLaplace.contact_right - youngLaplace.contact_left : null;
+  const selected = selectedOverlayKind(result);
   fitSummary.innerHTML = `
-    <div class="fit-subhead">Circle fit</div>
-    <div class="metric"><span>Mean angle</span><b>${format(circle.theta_mean)}&deg;</b></div>
-    <div class="metric"><span>Left / right</span><b>${format(circle.theta_left)}&deg; / ${format(circle.theta_right)}&deg;</b></div>
-    <div class="metric"><span>Width / radius</span><b>${format(circleWidth)} / ${format(circle.radius)}</b></div>
-    <div class="metric"><span>Residual</span><b>${format(circle.residual_stdev, 3)}</b></div>
-    <div class="fit-subhead">Ellipse fit</div>
-    <div class="metric"><span>Mean angle</span><b>${ellipse ? `${format(ellipse.theta_mean)}&deg;` : "n/a"}</b></div>
-    <div class="metric"><span>Left / right</span><b>${ellipse ? `${format(ellipse.theta_left)}&deg; / ${format(ellipse.theta_right)}&deg;` : "n/a"}</b></div>
-    <div class="metric"><span>Width</span><b>${ellipse ? `${format(ellipseWidth)} px` : "n/a"}</b></div>
-    <div class="metric"><span>a / b / e</span><b>${ellipse ? `${format(ellipse.a)} / ${format(ellipse.b)} / ${format(ellipse.eccentricity, 3)}` : "n/a"}</b></div>
-    <div class="metric"><span>Ellipse residual</span><b>${ellipse ? format(ellipse.residual_stdev, 3) : "n/a"}</b></div>
-    <div class="fit-subhead">Young-Laplace fit</div>
-    <div class="metric"><span>Mean angle</span><b>${youngLaplace ? `${format(youngLaplace.theta_mean)}&deg;` : "n/a"}</b></div>
-    <div class="metric"><span>Left / right</span><b>${youngLaplace ? `${format(youngLaplace.theta_left)}&deg; / ${format(youngLaplace.theta_right)}&deg;` : "n/a"}</b></div>
-    <div class="metric"><span>Width</span><b>${youngLaplace ? `${format(youngLaplaceWidth)} px` : "n/a"}</b></div>
-    <div class="metric"><span>Bond / scale</span><b>${youngLaplace ? `${format(youngLaplace.bond, 3)} / ${format(youngLaplace.scale_px)}` : "n/a"}</b></div>
-    <div class="metric"><span>YL RMS residual</span><b>${youngLaplace ? format(youngLaplace.residual_rms, 3) : "n/a"}</b></div>
+    <section class="fit-card fit-card-young-laplace ${selected === "young-laplace" ? "selected" : ""} ${youngLaplace ? "" : "unavailable"}" data-fit-overlay="young-laplace" role="button" tabindex="${youngLaplace ? "0" : "-1"}" aria-pressed="${selected === "young-laplace"}" aria-disabled="${!youngLaplace}">
+      <div class="fit-card-head"><span>Young-Laplace fit</span><b>${youngLaplace ? (selected === "young-laplace" ? "Drawn" : "Available") : "Unavailable"}</b></div>
+      <div class="metric"><span>Mean angle</span><b>${youngLaplace ? `${format(youngLaplace.theta_mean)}&deg;` : "n/a"}</b></div>
+      <div class="metric"><span>Left / right</span><b>${youngLaplace ? `${format(youngLaplace.theta_left)}&deg; / ${format(youngLaplace.theta_right)}&deg;` : "n/a"}</b></div>
+      <div class="metric"><span>Width</span><b>${youngLaplace ? `${format(youngLaplaceWidth)} px` : "n/a"}</b></div>
+      <div class="metric"><span>Bond / scale</span><b>${youngLaplace ? `${format(youngLaplace.bond, 3)} / ${format(youngLaplace.scale_px)}` : "n/a"}</b></div>
+      <div class="metric"><span>YL RMS residual</span><b>${youngLaplace ? format(youngLaplace.residual_rms, 3) : "n/a"}</b></div>
+    </section>
+    <section class="fit-card fit-card-ellipse ${selected === "ellipse" ? "selected" : ""} ${ellipse ? "" : "unavailable"}" data-fit-overlay="ellipse" role="button" tabindex="${ellipse ? "0" : "-1"}" aria-pressed="${selected === "ellipse"}" aria-disabled="${!ellipse}">
+      <div class="fit-card-head"><span>Ellipse fit</span><b>${ellipse ? (selected === "ellipse" ? "Drawn" : "Available") : "Unavailable"}</b></div>
+      <div class="metric"><span>Mean angle</span><b>${ellipse ? `${format(ellipse.theta_mean)}&deg;` : "n/a"}</b></div>
+      <div class="metric"><span>Left / right</span><b>${ellipse ? `${format(ellipse.theta_left)}&deg; / ${format(ellipse.theta_right)}&deg;` : "n/a"}</b></div>
+      <div class="metric"><span>Width</span><b>${ellipse ? `${format(ellipseWidth)} px` : "n/a"}</b></div>
+      <div class="metric"><span>a / b / e</span><b>${ellipse ? `${format(ellipse.a)} / ${format(ellipse.b)} / ${format(ellipse.eccentricity, 3)}` : "n/a"}</b></div>
+      <div class="metric"><span>Ellipse residual</span><b>${ellipse ? format(ellipse.residual_stdev, 3) : "n/a"}</b></div>
+    </section>
+    <section class="fit-card fit-card-circle ${selected === "circle" ? "selected" : ""}" data-fit-overlay="circle" role="button" tabindex="0" aria-pressed="${selected === "circle"}">
+      <div class="fit-card-head"><span>Circle fit</span><b>${selected === "circle" ? "Drawn" : "Available"}</b></div>
+      <div class="metric"><span>Mean angle</span><b>${format(circle.theta_mean)}&deg;</b></div>
+      <div class="metric"><span>Left / right</span><b>${format(circle.theta_left)}&deg; / ${format(circle.theta_right)}&deg;</b></div>
+      <div class="metric"><span>Width / radius</span><b>${format(circleWidth)} / ${format(circle.radius)}</b></div>
+      <div class="metric"><span>Residual</span><b>${format(circle.residual_stdev, 3)}</b></div>
+    </section>
   `;
 }
 
@@ -1288,6 +1336,7 @@ async function fitCurrent() {
     const savedRun = {
       ...result,
       label,
+      overlayFit: lowestResidualFitKind(result),
       overlayTrace: clonePoints(trace),
       overlayBaseline: clonePoints(baseline),
       saved_at: new Date().toISOString(),
@@ -1317,6 +1366,29 @@ function updateRunControls() {
   exportTableBtn.disabled = disabled;
 }
 
+function setCurrentOverlayFit(kind) {
+  if (!currentFit || !fitForKind(currentFit, kind)) return;
+  currentFit.overlayFit = kind;
+  syncActiveRecord();
+  renderFit(currentFit);
+  updateRunRowHover();
+  draw();
+}
+
+fitSummary.addEventListener("click", (event) => {
+  const card = event.target.closest("[data-fit-overlay]");
+  if (!card || card.classList.contains("unavailable")) return;
+  setCurrentOverlayFit(card.dataset.fitOverlay);
+});
+
+fitSummary.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const card = event.target.closest("[data-fit-overlay]");
+  if (!card || card.classList.contains("unavailable")) return;
+  event.preventDefault();
+  setCurrentOverlayFit(card.dataset.fitOverlay);
+});
+
 function renderImageList() {
   if (!images.length) {
     imageList.innerHTML = `<div class="image-empty">No images loaded.</div>`;
@@ -1338,7 +1410,10 @@ function renderRuns() {
   activeResultsLabel.textContent = active ? `Showing rows for ${active.name}` : "No active image";
   activeResultsLabel.title = active?.name || "";
   runsBody.innerHTML = runs.map((run, index) => `
-    <tr data-run-row="${index}" class="${hoveredRunIndex === index ? "run-hover" : ""}">
+    <tr data-run-row="${index}" class="${[
+      hoveredRunIndex === index ? "run-hover" : "",
+      run === currentFit ? "run-selected" : "",
+    ].filter(Boolean).join(" ")}">
       <td><input class="run-label-input" data-edit-run-label="${index}" value="${escapeHtml(run.label || `Run ${index + 1}`)}" aria-label="Run label"></td>
       <td>${format(run.young_laplace?.theta_mean)}</td>
       <td>${format(contactWidth(run.young_laplace), 1)}</td>
@@ -1383,22 +1458,28 @@ imageList.addEventListener("click", (event) => {
 
 runsBody.addEventListener("click", (event) => {
   const button = event.target.closest("[data-delete-run]");
-  if (!button) return;
-  const deletedIndex = Number(button.dataset.deleteRun);
-  const deletedRun = runs[deletedIndex];
-  runs.splice(deletedIndex, 1);
-  if (hoveredRunIndex === deletedIndex) hoveredRunIndex = null;
-  else if (hoveredRunIndex !== null && hoveredRunIndex > deletedIndex) hoveredRunIndex -= 1;
-  if (deletedRun === currentFit) {
-    currentFit = null;
-    resetFitSummary();
+  if (button) {
+    const deletedIndex = Number(button.dataset.deleteRun);
+    const deletedRun = runs[deletedIndex];
+    runs.splice(deletedIndex, 1);
+    if (hoveredRunIndex === deletedIndex) hoveredRunIndex = null;
+    else if (hoveredRunIndex !== null && hoveredRunIndex > deletedIndex) hoveredRunIndex -= 1;
+    if (deletedRun === currentFit) {
+      currentFit = null;
+      resetFitSummary();
+    }
+    syncActiveRecord();
+    renderRuns();
+    renderImageList();
+    runLabel.value = `Run ${runs.length + 1}`;
+    syncActiveRecord();
+    draw();
+    return;
   }
-  syncActiveRecord();
-  renderRuns();
-  renderImageList();
-  runLabel.value = `Run ${runs.length + 1}`;
-  syncActiveRecord();
-  draw();
+  if (event.target.closest("[data-edit-run-label]")) return;
+  const row = event.target.closest("[data-run-row]");
+  if (!row) return;
+  selectRun(Number(row.dataset.runRow));
 });
 
 runsBody.addEventListener("input", (event) => {

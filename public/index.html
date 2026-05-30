@@ -10,16 +10,32 @@
   <body>
     <main class="app">
       <aside class="rail">
-        <div>
+        <div class="rail-title">
           <p class="eyebrow">Contact Angle</p>
-          <h1>Workbench</h1>
+          <div class="title-row">
+            <h1>Workbench</h1>
+            <div class="hotkey-help" tabindex="0" aria-label="Keyboard shortcuts">
+              <span class="hotkey-trigger">?</span>
+              <div class="hotkey-popover" role="tooltip">
+                <div><kbd>Shift</kbd><span>hold opposite mode</span></div>
+                <div><kbd>Right mouse</kbd><span>pan</span></div>
+                <div><kbd>F</kbd><span>fit</span></div>
+                <div><kbd>Ctrl</kbd><kbd>Z</kbd><span>undo point</span></div>
+                <div><kbd>Alt</kbd><kbd>Z</kbd><span>redo point</span></div>
+                <div><kbd>T</kbd><span>threshold view</span></div>
+                <div><kbd>+ / -</kbd><span>zoom</span></div>
+                <div><kbd>0</kbd><span>reset view</span></div>
+                <div><kbd>E</kbd><span>export csv</span></div>
+              </div>
+            </div>
+          </div>
         </div>
         <label class="file-picker">
           <input id="imageInput" type="file" accept="image/*" multiple>
           <span>Load image</span>
         </label>
         <div id="imageNameDisplay" class="image-name-display">No image loaded</div>
-        <div class="segmented" role="group" aria-label="Drawing mode">
+        <div class="segmented rail-section-divider" role="group" aria-label="Drawing mode">
           <button class="mode active" data-mode="trace" title="Trace droplet boundary">Trace</button>
           <button class="mode" data-mode="baseline" title="Pick the solid baseline">Baseline</button>
         </div>
@@ -29,11 +45,11 @@
           <button id="zoomInBtn" title="Zoom in">+</button>
         </div>
         <div class="controls">
-          <label>
+          <label class="rail-section-divider">
             Run label
             <input id="runLabel" value="Run 1">
           </label>
-          <label class="range-label" title="Minimum image-pixel distance between captured trace points. Lower values make denser traces.">
+          <label class="range-label rail-section-divider rail-section-bottom-divider" title="Minimum image-pixel distance between captured trace points. Lower values make denser traces.">
             Brush spacing
             <span class="range-wrap">
               <input id="spacing" type="range" min="2" max="16" value="5" title="Minimum image-pixel distance between captured trace points. Lower values make denser traces.">
@@ -56,20 +72,6 @@
           <button id="undoBtn">Undo Point</button>
           <button id="clearBtn">Clear</button>
           <button id="exportBtn">Export CSV</button>
-        </div>
-        <div class="hotkey-help" tabindex="0" aria-label="Keyboard shortcuts">
-          <span class="hotkey-trigger">?</span>
-          <div class="hotkey-popover" role="tooltip">
-            <div><kbd>Shift</kbd><span>hold opposite mode</span></div>
-            <div><kbd>Right mouse</kbd><span>pan</span></div>
-            <div><kbd>F</kbd><span>fit</span></div>
-            <div><kbd>Ctrl</kbd><kbd>Z</kbd><span>undo point</span></div>
-            <div><kbd>Alt</kbd><kbd>Z</kbd><span>redo point</span></div>
-            <div><kbd>T</kbd><span>threshold view</span></div>
-            <div><kbd>+ / -</kbd><span>zoom</span></div>
-            <div><kbd>0</kbd><span>reset view</span></div>
-            <div><kbd>E</kbd><span>export csv</span></div>
-          </div>
         </div>
       </aside>
 
