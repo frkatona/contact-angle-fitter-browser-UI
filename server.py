@@ -370,16 +370,13 @@ def _fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if len(local) < 6:
         raise ValueError("Droplet trace is not on the droplet side of the baseline.")
 
-    fit_type = str(payload.get("fitType", "conic"))
     circle = _fit_circle(local)
     ellipse = _fit_ellipse(local, circle)
-    young_laplace = _fit_young_laplace(local, circle) if fit_type == "young-laplace" else None
-    if fit_type == "young-laplace":
-        if young_laplace is None:
-            raise ValueError("Young-Laplace fit failed. Try a denser, cleaner full-edge trace.")
-        selected = young_laplace
-    else:
-        selected = ellipse if ellipse and ellipse["residual_stdev"] < circle["residual_stdev"] * 1.1 else circle
+    try:
+        young_laplace = _fit_young_laplace(local, circle)
+    except Exception:
+        young_laplace = None
+    selected = ellipse if ellipse and ellipse["residual_stdev"] < circle["residual_stdev"] * 1.1 else circle
     width = selected["contact_right"] - selected["contact_left"]
 
     return {

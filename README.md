@@ -34,7 +34,7 @@ docker compose up --build
 3. Choose **Trace** and drag or click along the visible droplet boundary.
 4. Use the mouse wheel or zoom controls for small droplets. Right mouse drag to pan without editing traces.
 5. Optionally press **T** to toggle a binary threshold view and adjust the threshold value in the workbench panel.
-6. Use the split **Fit** button to choose **Circle / ellipse** or **Young-Laplace**, then fit the trace and add the measurement to the output table.
+6. Press **Fit** to compute circle, ellipse, and Young-Laplace fits, then add the measurement to the output table.
 7. Repeat traces on the same image, or switch between loaded images in the output panel.
 8. Rename or delete rows, remove images as needed, then export CSV.
 
@@ -56,7 +56,7 @@ Export a CSV from the app, then run:
 python visualize_contact_angle_data.py --input contact-angle-session.csv
 ```
 
-By default, outputs are written to `contact_angle_analysis/`. The script creates summary CSVs plus plots for contact-angle distributions, mean contact angle by group, left-right asymmetry, contact width versus angle, residuals versus angle, selected model counts, circle-versus-ellipse residuals, and numeric correlations when the required columns are available.
+By default, outputs are written to `contact_angle_analysis/`. The script creates summary CSVs plus plots for contact-angle distributions, mean contact angle by group, left-right asymmetry, contact width versus angle, residuals versus angle, model counts, circle-versus-ellipse residuals, and numeric correlations when the required columns are available.
 
 Grouping is automatic: the script prefers `sample_name`, `condition`, `treatment`, `label`, and then `image_name`. You can override this with any column in the CSV:
 
@@ -66,7 +66,7 @@ python visualize_contact_angle_data.py --input results.csv --group-by image_name
 
 ## Contact Angle Techniques
 
-Contact angle measurement usually starts by identifying the solid baseline and the visible liquid-air boundary. This app keeps that process user-guided: the user places the baseline, traces the droplet edge, and the backend fits the traced points in a baseline-aligned coordinate system. It can use the current circle/ellipse workflow or a Young-Laplace profile fit, then reports the left, right, and mean contact angles measured through the droplet phase from the tangent lines where the fitted curve intersects the baseline.
+Contact angle measurement usually starts by identifying the solid baseline and the visible liquid-air boundary. This app keeps that process user-guided: the user places the baseline, traces the droplet edge, and the backend fits the traced points in a baseline-aligned coordinate system. It computes circle, ellipse, and Young-Laplace profile fits, then reports the left, right, and mean contact angles measured through the droplet phase from the tangent lines where the fitted curve intersects the baseline.
 
 This approach is useful for noisy microscope or goniometer images where full automation can choose the wrong edge. More advanced implementations could add automated edge detection, subpixel contour refinement, calibration from known pixel-to-length scales, uncertainty estimates from repeated traces or bootstrap resampling, and batch processing across image sequences. Those additions would make the tool stronger for high-throughput or publication-grade measurements while preserving the current manual correction workflow.
 
@@ -208,11 +208,11 @@ The Young-Laplace option fits a symmetric axisymmetric droplet profile in the sa
 
 The optimized parameters are the centerline position, pixel scale, contact angle parameter, and dimensionless Bond-like coefficient \(B\). The solver is initialized from the circular fit, samples the resulting profile from left contact to right contact, and minimizes geometric point-to-polyline distance with a soft robust loss. This makes the method most appropriate for clean full-edge traces of gravity-distorted drops.
 
-### Model Selection
+### Model Output
 
-For **Circle / ellipse**, the selected model is determined automatically after both conic fits are attempted. The circular fit is always computed first. The elliptical fit is available only when SciPy is installed and at least 10 trace points are present. If the elliptical optimizer fails or the fitted ellipse does not intersect the baseline, the app uses the circular fit. For **Young-Laplace**, the Young-Laplace profile is selected directly when its optimizer succeeds.
+Each fit request attempts all three models. The circular fit is always computed first. The elliptical and Young-Laplace fits are available only when SciPy is installed and enough trace points are present. If either nonlinear optimizer fails, that model is reported as unavailable while the successful models remain in the output table and CSV export.
 
-When both models are available, the current selection rule is a conservative residual heuristic:
+For overlay compatibility, the backend still marks one conic fit as the internal display fit using a conservative residual heuristic:
 
 \[
 \text{select ellipse if }

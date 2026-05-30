@@ -5,9 +5,6 @@ const imageInput = document.querySelector("#imageInput");
 const imageNameDisplay = document.querySelector("#imageNameDisplay");
 const emptyState = document.querySelector("#emptyState");
 const fitBtn = document.querySelector("#fitBtn");
-const fitMenuBtn = document.querySelector("#fitMenuBtn");
-const fitMenu = document.querySelector("#fitMenu");
-const fitChoiceLabel = document.querySelector("#fitChoiceLabel");
 const undoBtn = document.querySelector("#undoBtn");
 const clearBtn = document.querySelector("#clearBtn");
 const exportBtn = document.querySelector("#exportBtn");
@@ -16,9 +13,11 @@ const runLabel = document.querySelector("#runLabel");
 const spacing = document.querySelector("#spacing");
 const spacingBubble = document.querySelector("#spacingBubble");
 const thresholdInput = document.querySelector("#thresholdInput");
+const thresholdToggleBtn = document.querySelector("#thresholdToggleBtn");
 const thresholdControl = document.querySelector("#thresholdControl");
 const fitSummary = document.querySelector("#fitSummary");
 const runsBody = document.querySelector("#runsBody");
+const outputTable = document.querySelector(".output-table");
 const imageList = document.querySelector("#imageList");
 const activeResultsLabel = document.querySelector("#activeResultsLabel");
 const zoomOutBtn = document.querySelector("#zoomOutBtn");
@@ -53,14 +52,14 @@ let heldMode = null;
 let heldModeReturn = null;
 let panelResize = null;
 let hoveredRunIndex = null;
-let selectedFitType = localStorage.getItem("contactAngleFitType") || "conic";
 let protractorCursorEnabled = false;
 let protractorCursorPoint = null;
+let columnResize = null;
 
-const FIT_TYPES = {
-  conic: "Circle / ellipse",
-  "young-laplace": "Young-Laplace",
-};
+const TABLE_COLUMN_WIDTHS_KEY = "contactAngleOutputColumnWidthsV3";
+const DEFAULT_OUTPUT_COLUMN_WIDTHS = [150, 88, 88, 76, 104, 108, 96, 112, 116, 104, 52, 36];
+const MIN_OUTPUT_COLUMN_WIDTHS = [120, 72, 72, 64, 84, 88, 76, 92, 96, 84, 44, 34];
+const MAX_OUTPUT_COLUMN_WIDTH = 1200;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -75,6 +74,61 @@ function applyStoredPanelSizes() {
   if (Number.isFinite(panelWidth) && panelWidth > 0) {
     app.style.setProperty("--panel-width", `${clamp(panelWidth, 300, 620)}px`);
   }
+}
+
+function readStoredColumnWidths() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(TABLE_COLUMN_WIDTHS_KEY) || "[]");
+    if (!Array.isArray(stored)) return DEFAULT_OUTPUT_COLUMN_WIDTHS;
+    return DEFAULT_OUTPUT_COLUMN_WIDTHS.map((defaultWidth, index) => {
+      const width = Number(stored[index]);
+      return Number.isFinite(width) && width > 0
+        ? clamp(width, MIN_OUTPUT_COLUMN_WIDTHS[index], MAX_OUTPUT_COLUMN_WIDTH)
+        : defaultWidth;
+    });
+  } catch {
+    return DEFAULT_OUTPUT_COLUMN_WIDTHS;
+  }
+}
+
+function currentColumnWidths() {
+  return Array.from(outputTable.querySelectorAll("col")).map((col, index) => (
+    Number.parseFloat(col.style.width) || DEFAULT_OUTPUT_COLUMN_WIDTHS[index]
+  ));
+}
+
+function applyOutputColumnWidths(widths = readStoredColumnWidths()) {
+  outputTable.querySelectorAll("col").forEach((col, index) => {
+    const width = clamp(Number(widths[index]) || DEFAULT_OUTPUT_COLUMN_WIDTHS[index], MIN_OUTPUT_COLUMN_WIDTHS[index], MAX_OUTPUT_COLUMN_WIDTH);
+    col.style.width = `${width}px`;
+  });
+}
+
+function setupOutputTableColumnResize() {
+  applyOutputColumnWidths();
+  outputTable.querySelectorAll("thead th").forEach((th, index) => {
+    th.dataset.columnIndex = String(index);
+    if (index === outputTable.querySelectorAll("thead th").length - 1) return;
+    const handle = document.createElement("span");
+    handle.className = "column-resize-handle";
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-orientation", "vertical");
+    handle.setAttribute("aria-label", `Resize ${th.textContent.trim()} column`);
+    th.appendChild(handle);
+    handle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      columnResize = {
+        index,
+        startX: event.clientX,
+        startWidth: currentColumnWidths()[index],
+        handle,
+      };
+      handle.setPointerCapture(event.pointerId);
+      handle.classList.add("active");
+      document.body.classList.add("resizing-table-column");
+    });
+  });
 }
 
 function setMode(nextMode, options = {}) {
@@ -186,6 +240,7 @@ function redoPoint() {
 function setThresholdEnabled(enabled, shouldDraw = true) {
   thresholdEnabled = enabled;
   thresholdControl.classList.toggle("active", thresholdEnabled);
+  syncThresholdToggleButton();
   syncActiveRecord();
   if (shouldDraw) draw();
 }
@@ -193,6 +248,7 @@ function setThresholdEnabled(enabled, shouldDraw = true) {
 function setThresholdValue(value, shouldDraw = true) {
   thresholdValue = clamp(Math.round(Number(value) || 0), 0, 255);
   thresholdInput.value = thresholdValue;
+  thresholdInput.title = `Threshold: ${thresholdValue}`;
   const record = activeRecord();
   if (record) record.thresholdCache = null;
   syncActiveRecord();
@@ -201,6 +257,11 @@ function setThresholdValue(value, shouldDraw = true) {
 
 function toggleThresholdView() {
   setThresholdEnabled(!thresholdEnabled);
+}
+
+function syncThresholdToggleButton() {
+  thresholdToggleBtn.setAttribute("aria-pressed", String(thresholdEnabled));
+  thresholdToggleBtn.textContent = thresholdEnabled ? "On" : "Off";
 }
 
 function updateSpacingBubble() {
@@ -221,24 +282,8 @@ function hideSpacingBubble() {
   spacing.parentElement.classList.remove("active");
 }
 
-function setFitType(nextType) {
-  selectedFitType = FIT_TYPES[nextType] ? nextType : "conic";
-  localStorage.setItem("contactAngleFitType", selectedFitType);
-  fitChoiceLabel.textContent = FIT_TYPES[selectedFitType];
-  fitMenu.querySelectorAll("[data-fit-type]").forEach((button) => {
-    const active = button.dataset.fitType === selectedFitType;
-    button.setAttribute("aria-checked", String(active));
-  });
-}
-
-function closeFitMenu() {
-  fitMenu.classList.remove("open");
-  fitMenuBtn.setAttribute("aria-expanded", "false");
-}
-
 function setFitControlsDisabled(disabled) {
   fitBtn.disabled = disabled;
-  fitMenuBtn.disabled = disabled;
 }
 
 document.querySelectorAll(".mode").forEach((button) => {
@@ -249,7 +294,6 @@ document.querySelectorAll(".mode").forEach((button) => {
 });
 
 setMode(mode, { temporary: true });
-setFitType(selectedFitType);
 
 function updateZoomLabel() {
   zoomLevel.textContent = `${Math.round(viewport.zoom * 100)}%`;
@@ -272,6 +316,7 @@ function resizeCanvas() {
 }
 
 applyStoredPanelSizes();
+setupOutputTableColumnResize();
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 updateZoomLabel();
@@ -302,6 +347,7 @@ function clearActiveImage() {
   hoveredRunIndex = null;
   thresholdInput.value = thresholdValue;
   thresholdControl.classList.remove("active");
+  syncThresholdToggleButton();
   imageNameDisplay.textContent = "No image loaded";
   imageNameDisplay.title = "";
   emptyState.style.display = "";
@@ -337,6 +383,7 @@ function switchToImage(imageId) {
   runLabel.value = record.runLabel || `Run ${runs.length + 1}`;
   thresholdInput.value = thresholdValue;
   thresholdControl.classList.toggle("active", thresholdEnabled);
+  syncThresholdToggleButton();
   imageNameDisplay.textContent = record.name;
   imageNameDisplay.title = record.name;
   emptyState.style.display = "none";
@@ -415,6 +462,7 @@ imageInput.addEventListener("change", (event) => {
 
 runLabel.addEventListener("input", syncActiveRecord);
 thresholdInput.addEventListener("input", () => setThresholdValue(thresholdInput.value));
+thresholdToggleBtn.addEventListener("click", toggleThresholdView);
 spacing.addEventListener("input", showSpacingBubble);
 spacing.addEventListener("pointerdown", showSpacingBubble);
 spacing.addEventListener("pointerup", hideSpacingBubble);
@@ -439,6 +487,17 @@ resizeHandles.forEach((handle) => {
 });
 
 window.addEventListener("pointermove", (event) => {
+  if (columnResize) {
+    const widths = currentColumnWidths();
+    widths[columnResize.index] = clamp(
+      columnResize.startWidth + event.clientX - columnResize.startX,
+      MIN_OUTPUT_COLUMN_WIDTHS[columnResize.index],
+      MAX_OUTPUT_COLUMN_WIDTH,
+    );
+    applyOutputColumnWidths(widths);
+    localStorage.setItem(TABLE_COLUMN_WIDTHS_KEY, JSON.stringify(widths.map((width) => Math.round(width))));
+    return;
+  }
   if (!panelResize) return;
   const dx = event.clientX - panelResize.startX;
   if (panelResize.side === "rail") {
@@ -454,6 +513,12 @@ window.addEventListener("pointermove", (event) => {
 });
 
 window.addEventListener("pointerup", () => {
+  if (columnResize) {
+    columnResize.handle.classList.remove("active");
+    document.body.classList.remove("resizing-table-column");
+    columnResize = null;
+    return;
+  }
   if (!panelResize) return;
   panelResize.handle.classList.remove("active");
   document.body.classList.remove("resizing-panels");
@@ -462,6 +527,12 @@ window.addEventListener("pointerup", () => {
 });
 
 window.addEventListener("pointercancel", () => {
+  if (columnResize) {
+    columnResize.handle.classList.remove("active");
+    document.body.classList.remove("resizing-table-column");
+    columnResize = null;
+    return;
+  }
   if (!panelResize) return;
   panelResize.handle.classList.remove("active");
   document.body.classList.remove("resizing-panels");
@@ -1140,22 +1211,22 @@ function format(value, places = 2) {
   return Number(value).toFixed(places);
 }
 
-function formatFitName(fit) {
-  if (fit === "young-laplace") return "Young-Laplace";
-  if (fit === "ellipse") return "Ellipse";
-  if (fit === "circle") return "Circle";
-  return FIT_TYPES[fit] || fit;
+function contactWidth(fit) {
+  if (!fit || fit.contact_left === undefined || fit.contact_right === undefined) return null;
+  return fit.contact_right - fit.contact_left;
+}
+
+function modelResidual(fit) {
+  if (!fit) return null;
+  return fit.residual_rms ?? fit.residual_stdev;
 }
 
 function selectedResidual(run) {
-  if (run.fit === "young-laplace" && run.young_laplace) return run.young_laplace.residual_rms ?? run.young_laplace.residual_stdev;
-  if (run.fit === "ellipse" && run.ellipse) return run.ellipse.residual_stdev;
-  return run.circle?.residual_stdev;
+  return modelResidual(selectedFitDetails(run));
 }
 
 function circleContactWidth(run) {
-  if (!run.circle) return null;
-  return run.circle.contact_right - run.circle.contact_left;
+  return contactWidth(run.circle);
 }
 
 function escapeHtml(value) {
@@ -1176,7 +1247,6 @@ function renderFit(result) {
   const ellipseWidth = ellipse ? ellipse.contact_right - ellipse.contact_left : null;
   const youngLaplaceWidth = youngLaplace ? youngLaplace.contact_right - youngLaplace.contact_left : null;
   fitSummary.innerHTML = `
-    <div class="metric"><span>Selected model</span><b>${formatFitName(result.fit)}</b></div>
     <div class="fit-subhead">Circle fit</div>
     <div class="metric"><span>Mean angle</span><b>${format(circle.theta_mean)}&deg;</b></div>
     <div class="metric"><span>Left / right</span><b>${format(circle.theta_left)}&deg; / ${format(circle.theta_right)}&deg;</b></div>
@@ -1197,13 +1267,12 @@ function renderFit(result) {
   `;
 }
 
-async function fitCurrent(fitType = selectedFitType) {
+async function fitCurrent() {
   if (!img || fitBtn.disabled) return;
   const label = runLabel.value || `Run ${runs.length + 1}`;
   const payload = {
     imageName,
     label,
-    fitType,
     baseline: baseline.map((p) => [p.x, p.y]),
     points: trace.map((p) => [p.x, p.y]),
   };
@@ -1242,27 +1311,6 @@ async function fitCurrent(fitType = selectedFitType) {
 
 fitBtn.addEventListener("click", () => fitCurrent());
 
-fitMenuBtn.addEventListener("click", (event) => {
-  event.stopPropagation();
-  const open = !fitMenu.classList.contains("open");
-  fitMenu.classList.toggle("open", open);
-  fitMenuBtn.setAttribute("aria-expanded", String(open));
-});
-
-fitMenu.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-fit-type]");
-  if (!button) return;
-  setFitType(button.dataset.fitType);
-  closeFitMenu();
-  fitBtn.focus();
-});
-
-document.addEventListener("click", (event) => {
-  if (!fitMenu.classList.contains("open")) return;
-  if (event.target.closest(".split-fit")) return;
-  closeFitMenu();
-});
-
 function updateRunControls() {
   const disabled = allRuns().length === 0;
   exportBtn.disabled = disabled;
@@ -1292,13 +1340,15 @@ function renderRuns() {
   runsBody.innerHTML = runs.map((run, index) => `
     <tr data-run-row="${index}" class="${hoveredRunIndex === index ? "run-hover" : ""}">
       <td><input class="run-label-input" data-edit-run-label="${index}" value="${escapeHtml(run.label || `Run ${index + 1}`)}" aria-label="Run label"></td>
-      <td>${formatFitName(run.fit)}</td>
-      <td>${format(run.theta_mean)}</td>
+      <td>${format(run.young_laplace?.theta_mean)}</td>
+      <td>${format(contactWidth(run.young_laplace), 1)}</td>
+      <td>${format(modelResidual(run.young_laplace), 3)}</td>
       <td>${format(run.circle?.theta_mean)}</td>
-      <td>${format(run.theta_left)}</td>
-      <td>${format(run.theta_right)}</td>
-      <td>${format(run.contact_width_px, 1)}</td>
-      <td>${format(selectedResidual(run), 3)}</td>
+      <td>${format(contactWidth(run.circle), 1)}</td>
+      <td>${format(modelResidual(run.circle), 3)}</td>
+      <td>${format(run.ellipse?.theta_mean)}</td>
+      <td>${format(contactWidth(run.ellipse), 1)}</td>
+      <td>${format(modelResidual(run.ellipse), 3)}</td>
       <td>${run.point_count}</td>
       <td><button class="delete-run" data-delete-run="${index}" title="Delete row" aria-label="Delete row">x</button></td>
     </tr>
@@ -1399,6 +1449,13 @@ function exportRuns() {
     "baseline_length_px",
     "point_count",
     "selected_residual_stdev",
+    "young_laplace_theta_mean_deg",
+    "young_laplace_theta_left_deg",
+    "young_laplace_theta_right_deg",
+    "young_laplace_contact_width_px",
+    "young_laplace_bond",
+    "young_laplace_scale_px",
+    "young_laplace_residual_rms",
     "circle_theta_mean_deg",
     "circle_theta_left_deg",
     "circle_theta_right_deg",
@@ -1414,13 +1471,6 @@ function exportRuns() {
     "ellipse_b",
     "ellipse_eccentricity",
     "ellipse_residual_stdev",
-    "young_laplace_theta_mean_deg",
-    "young_laplace_theta_left_deg",
-    "young_laplace_theta_right_deg",
-    "young_laplace_contact_width_px",
-    "young_laplace_bond",
-    "young_laplace_scale_px",
-    "young_laplace_residual_rms",
     "saved_at",
   ];
   const rows = exportRows.map((run) => {
@@ -1443,6 +1493,13 @@ function exportRuns() {
       run.baseline_length_px,
       run.point_count,
       selectedResidual(run),
+      youngLaplace.theta_mean,
+      youngLaplace.theta_left,
+      youngLaplace.theta_right,
+      youngLaplaceWidth,
+      youngLaplace.bond,
+      youngLaplace.scale_px,
+      youngLaplace.residual_rms,
       run.circle.theta_mean,
       run.circle.theta_left,
       run.circle.theta_right,
@@ -1458,13 +1515,6 @@ function exportRuns() {
       ellipse.b,
       ellipse.eccentricity,
       ellipse.residual_stdev,
-      youngLaplace.theta_mean,
-      youngLaplace.theta_left,
-      youngLaplace.theta_right,
-      youngLaplaceWidth,
-      youngLaplace.bond,
-      youngLaplace.scale_px,
-      youngLaplace.residual_rms,
       run.saved_at,
     ];
   });
@@ -1533,7 +1583,6 @@ window.addEventListener("keydown", (event) => {
     resetViewport();
   } else if (event.key === "Escape") {
     event.preventDefault();
-    closeFitMenu();
     heldMode = null;
     heldModeReturn = null;
     setMode("trace");

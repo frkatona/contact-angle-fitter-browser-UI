@@ -226,8 +226,75 @@ input:not([type]) {
 .threshold-control {
   border: 1px solid transparent;
   border-radius: 7px;
+  color: var(--muted);
+  display: grid;
+  font-size: 13px;
+  gap: 7px;
   margin: -4px;
   padding: 4px;
+}
+
+.threshold-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 54px minmax(0, 1fr);
+}
+
+.threshold-row button {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 38px;
+}
+
+.threshold-row button[aria-pressed="true"] {
+  background: var(--baseline);
+  border-color: var(--baseline);
+  color: white;
+}
+
+.threshold-slider-wrap {
+  display: grid;
+  min-height: 38px;
+}
+
+.threshold-slider-wrap input[type="range"] {
+  accent-color: var(--baseline);
+  margin: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.threshold-ticks {
+  border-left: 1px solid rgba(29, 36, 32, 0.56);
+  border-right: 1px solid rgba(29, 36, 32, 0.56);
+  display: block;
+  height: 12px;
+  margin: -2px 7px 0;
+  position: relative;
+}
+
+.threshold-ticks::before,
+.threshold-ticks::after {
+  bottom: 1px;
+  content: "";
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+.threshold-ticks::before {
+  background: repeating-linear-gradient(to right, rgba(29, 36, 32, 0.34) 0 1px, transparent 1px 6.25%);
+  height: 5px;
+}
+
+.threshold-ticks::after {
+  background: repeating-linear-gradient(to right, rgba(29, 36, 32, 0.68) 0 1px, transparent 1px 25%);
+  height: 10px;
 }
 
 .threshold-control.active {
@@ -237,8 +304,10 @@ input:not([type]) {
 }
 
 .actions {
+  border-top: 1px solid var(--line);
   display: grid;
   gap: 8px;
+  padding-top: 14px;
 }
 
 .actions button {
@@ -250,67 +319,10 @@ input:not([type]) {
   min-height: 38px;
 }
 
-.actions .fit-primary,
-.actions .fit-menu-button {
+.actions button:first-child {
   background: var(--accent);
   border-color: var(--accent);
   color: white;
-  font-weight: 700;
-}
-
-.split-fit {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
-  position: relative;
-}
-
-.split-fit .fit-primary {
-  border-radius: 6px 0 0 6px;
-  border-right-color: rgba(255, 255, 255, 0.34);
-  overflow: hidden;
-  padding: 0 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.split-fit .fit-menu-button {
-  border-left: 0;
-  border-radius: 0 6px 6px 0;
-  font-size: 14px;
-  padding: 0;
-}
-
-.fit-menu {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  box-shadow: 0 14px 34px rgba(29, 36, 32, 0.12);
-  display: none;
-  gap: 2px;
-  left: 0;
-  padding: 4px;
-  position: absolute;
-  right: 0;
-  top: calc(100% + 5px);
-  z-index: 4;
-}
-
-.fit-menu.open {
-  display: grid;
-}
-
-.fit-menu button {
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  color: var(--ink);
-  min-height: 34px;
-  padding: 0 10px;
-  text-align: left;
-}
-
-.fit-menu button[aria-checked="true"] {
-  background: #edf0eb;
   font-weight: 700;
 }
 
@@ -608,11 +620,19 @@ table {
   min-width: 100%;
 }
 
+.output-table {
+  font-variant-numeric: tabular-nums;
+  table-layout: fixed;
+  width: max-content;
+}
+
 th,
 td {
   border-bottom: 1px solid var(--line);
+  overflow: hidden;
   padding: 8px 6px;
   text-align: right;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -632,6 +652,38 @@ td:first-child {
 th {
   color: var(--muted);
   font-weight: 700;
+  position: relative;
+  user-select: none;
+}
+
+.column-resize-handle {
+  bottom: 0;
+  cursor: col-resize;
+  position: absolute;
+  right: 0;
+  top: 0;
+  touch-action: none;
+  width: 9px;
+  z-index: 2;
+}
+
+.column-resize-handle::after {
+  background: transparent;
+  content: "";
+  inset: 7px 4px;
+  position: absolute;
+  transition: background 120ms ease;
+  width: 1px;
+}
+
+.column-resize-handle:hover::after,
+.column-resize-handle.active::after {
+  background: var(--accent);
+}
+
+body.resizing-table-column {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .output-table .delete-run {
@@ -652,8 +704,9 @@ th {
   border: 1px solid transparent;
   border-radius: 5px;
   color: var(--ink);
-  max-width: 132px;
+  max-width: none;
   min-height: 28px;
+  min-width: 0;
   padding: 0 6px;
   width: 100%;
 }

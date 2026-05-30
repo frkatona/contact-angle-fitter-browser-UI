@@ -40,20 +40,19 @@
               <span id="spacingBubble" class="range-bubble">5</span>
             </span>
           </label>
-          <label id="thresholdControl" class="threshold-control">
-            Threshold
-            <input id="thresholdInput" type="number" min="0" max="255" value="128">
-          </label>
-        </div>
-        <div class="actions">
-          <div class="split-fit">
-            <button id="fitBtn" class="fit-primary">Fit: <span id="fitChoiceLabel">Circle / ellipse</span></button>
-            <button id="fitMenuBtn" class="fit-menu-button" type="button" aria-label="Choose fit type" aria-expanded="false">▾</button>
-            <div id="fitMenu" class="fit-menu" role="menu">
-              <button type="button" role="menuitemradio" data-fit-type="conic" aria-checked="true">Circle / ellipse</button>
-              <button type="button" role="menuitemradio" data-fit-type="young-laplace" aria-checked="false">Young-Laplace</button>
+          <div id="thresholdControl" class="threshold-control">
+            <span class="control-label">Threshold</span>
+            <div class="threshold-row">
+              <button id="thresholdToggleBtn" type="button" aria-pressed="false" title="Toggle threshold view">Off</button>
+              <div class="threshold-slider-wrap">
+                <input id="thresholdInput" type="range" min="0" max="255" step="1" value="128" aria-label="Threshold value" title="Threshold: 128">
+                <span class="threshold-ticks" aria-hidden="true"></span>
+              </div>
             </div>
           </div>
+        </div>
+        <div class="actions">
+          <button id="fitBtn">Fit</button>
           <button id="undoBtn">Undo Point</button>
           <button id="clearBtn">Clear</button>
           <button id="exportBtn">Export CSV</button>
@@ -63,7 +62,7 @@
           <div class="hotkey-popover" role="tooltip">
             <div><kbd>Shift</kbd><span>hold opposite mode</span></div>
             <div><kbd>Right mouse</kbd><span>pan</span></div>
-            <div><kbd>F</kbd><span>fit selected model</span></div>
+            <div><kbd>F</kbd><span>fit</span></div>
             <div><kbd>Ctrl</kbd><kbd>Z</kbd><span>undo point</span></div>
             <div><kbd>Alt</kbd><kbd>Z</kbd><span>redo point</span></div>
             <div><kbd>T</kbd><span>threshold view</span></div>
@@ -104,16 +103,32 @@
           <div id="activeResultsLabel" class="active-results-label">No active image</div>
           <div class="table-wrap">
             <table class="output-table">
+              <colgroup>
+                <col>
+                <col>
+                <col>
+                <col>
+                <col>
+                <col>
+                <col>
+                <col>
+                <col>
+                <col>
+                <col>
+                <col>
+              </colgroup>
               <thead>
                 <tr>
                   <th>Label</th>
-                  <th>Fit</th>
-                  <th>Mean</th>
-                  <th>Circle</th>
-                  <th>Left</th>
-                  <th>Right</th>
-                  <th>Width</th>
-                  <th>Residual</th>
+                  <th>YL mean</th>
+                  <th>YL width</th>
+                  <th>YL res</th>
+                  <th>Circle mean</th>
+                  <th>Circle width</th>
+                  <th>Circle res</th>
+                  <th>Ellipse mean</th>
+                  <th>Ellipse width</th>
+                  <th>Ellipse res</th>
                   <th>Pts</th>
                   <th></th>
                 </tr>
