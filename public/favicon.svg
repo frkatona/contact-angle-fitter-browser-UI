@@ -1,15 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Contact angle droplet icon">
-  <rect width="64" height="64" rx="12" fill="#c9c9c2"/>
-  <path d="M7 44h50" stroke="#111" stroke-width="4" stroke-linecap="round"/>
-  <path d="M10 43h44" stroke="#00a8e8" stroke-width="3" stroke-linecap="round"/>
-  <path d="M12.5 42.5C13 18.5 50.5 18.5 51.5 42.5Z" fill="#111" stroke="#2fbf71" stroke-width="2.25" stroke-linejoin="round"/>
-  <ellipse cx="32" cy="35" rx="6.5" ry="5" fill="#f2f5f6" opacity=".9"/>
-  <circle cx="10.5" cy="43" r="4.5" fill="#f4f5f5"/>
-  <circle cx="53.5" cy="43" r="4.5" fill="#f4f5f5"/>
-  <circle cx="8" cy="43" r="3.2" fill="#e4552d"/>
-  <circle cx="56" cy="43" r="3.2" fill="#e4552d"/>
-  <path d="M8.5 33.5l8 22" stroke="#ff6f3d" stroke-width="2" stroke-linecap="round"/>
-  <path d="M55.5 33.5l-8 22" stroke="#ff6f3d" stroke-width="2" stroke-linecap="round"/>
-  <path d="M14 43a9 9 0 0 1 9-9" fill="none" stroke="#ffd23f" stroke-width="2.5" stroke-linecap="round"/>
-  <path d="M50 43a9 9 0 0 0-9-9" fill="none" stroke="#ffd23f" stroke-width="2.5" stroke-linecap="round"/>
+  <rect width="64" height="64" rx="13" fill="#f6f8f1"/>
+  <path d="M10 52h44" stroke="#b24f34" stroke-width="5" stroke-linecap="round"/>
+  <path d="M32 6C20.2 17.4 13 29 13 41.3C13 51.4 21.1 57 32 57C42.9 57 51 51.4 51 41.3C51 29 43.8 17.4 32 6Z" fill="#2580c3"/>
+  <path d="M15 52C15 41.1 21.8 30.5 32 18.7C42.2 30.5 49 41.1 49 52" fill="none" stroke="#b24f34" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
